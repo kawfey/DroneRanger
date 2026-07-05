@@ -1,0 +1,51 @@
+export type LinkProfileId = "control" | "telemetry" | "video";
+
+export type LinkDirection = "operator-to-drone" | "drone-to-operator";
+
+export type LinkProfile = {
+  id: LinkProfileId;
+  direction: LinkDirection;
+  frequencyMHz: number;
+  txPowerDbm: number;
+  txGainDbi: number;
+  txLossDb: number;
+  rxGainDbi: number;
+  rxLossDb: number;
+  rxSensitivityDbm: number;
+  requiredMarginDb: number;
+};
+
+export type AnalysisRequest = {
+  operator: {
+    lng: number;
+    lat: number;
+    antennaHeightM: number;
+  };
+  radiusM: number;
+  gridResolutionM: number;
+  altitude: {
+    minM: number;
+    maxM: number;
+    stepM: number;
+  };
+  profiles: LinkProfile[];
+  selectedProfileIds: LinkProfileId[];
+};
+
+export type DebugMode =
+  | "combined"
+  | "control"
+  | "telemetry"
+  | "video"
+  | "los"
+  | "margin"
+  | "blocker"
+  | "shademap";
+
+export type CoveragePixel = {
+  requiredAltitudeM: number;
+  reachable: boolean;
+  marginDb: number;
+  profileMask: number;
+  debugValue: number;
+};

@@ -1,0 +1,109 @@
+# OS and editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+secrets/
+credentials/
+*.pem
+*.key
+
+# Node / frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+dist/
+build/
+.vite/
+.next/
+coverage/
+playwright-report/
+test-results/
+
+# TypeScript / JavaScript caches
+*.tsbuildinfo
+.eslintcache
+.parcel-cache/
+.turbo/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.venv/
+venv/
+env/
+ENV/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.nox/
+htmlcov/
+*.egg-info/
+
+# Python packaging outputs
+*.egg
+wheelhouse/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# Geospatial data and generated analysis artifacts
+data/raw/
+data/cache/
+data/processed/
+data/tiles/
+outputs/
+exports/
+
+*.tif
+*.tiff
+*.geotiff
+*.vrt
+*.ovr
+*.gpkg
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.geojsonl
+*.mbtiles
+*.pmtiles
+*.las
+*.laz
+*.dem
+
+# Local databases and service state
+*.sqlite
+*.sqlite3
+*.db
+.redis/
+
+# Logs and runtime files
+logs/
+*.log
+*.pid
+*.seed
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+.cache/

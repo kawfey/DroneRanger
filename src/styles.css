@@ -1,0 +1,269 @@
+:root {
+  color: #17202a;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0c1117;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app,
+.map {
+  width: 100vw;
+  height: 100vh;
+}
+
+.app {
+  position: relative;
+  overflow: hidden;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+}
+
+.toolbar,
+.profiles,
+.inspector,
+.token-panel,
+.hint {
+  position: absolute;
+  color: #17202a;
+  background: rgba(250, 252, 252, 0.94);
+  border: 1px solid rgba(22, 36, 48, 0.12);
+  box-shadow: 0 16px 44px rgba(8, 13, 20, 0.22);
+  backdrop-filter: blur(14px);
+}
+
+.toolbar,
+.profiles {
+  top: 16px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 14px;
+  border-radius: 8px;
+}
+
+.toolbar {
+  left: 16px;
+}
+
+.profiles {
+  right: 16px;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  font-weight: 750;
+}
+
+.panel-title button {
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(23, 32, 42, 0.16);
+  border-radius: 6px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.panel-title small {
+  margin-left: auto;
+  color: #61707d;
+  font-weight: 650;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: #334250;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+input[type="number"] {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid rgba(23, 32, 42, 0.18);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: #17202a;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: #16896a;
+}
+
+output {
+  color: #61707d;
+  font-size: 0.78rem;
+}
+
+.grid-three,
+.profile-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.grid-three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.profile-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.segmented button {
+  min-height: 34px;
+  border: 1px solid rgba(23, 32, 42, 0.16);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334250;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 720;
+}
+
+.segmented button.active {
+  border-color: #16896a;
+  background: #dff4eb;
+  color: #0b5f49;
+}
+
+.profile-card {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid rgba(23, 32, 42, 0.12);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.check-row {
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  margin-top: 0;
+}
+
+.check-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #16896a;
+}
+
+.inspector {
+  left: 16px;
+  bottom: 54px;
+  width: min(300px, calc(100vw - 32px));
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.inspector dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 14px;
+  margin: 10px 0 0;
+}
+
+.inspector dt {
+  color: #61707d;
+  font-size: 0.82rem;
+}
+
+.inspector dd {
+  margin: 0;
+  font-weight: 760;
+}
+
+.hint {
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #41505e;
+  font-size: 0.82rem;
+}
+
+.token-panel {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(440px, calc(100vw - 32px));
+  padding: 22px;
+  border-radius: 8px;
+}
+
+.token-panel h1 {
+  margin: 10px 0 8px;
+  font-size: 1.35rem;
+}
+
+.token-panel p {
+  margin: 0;
+  color: #41505e;
+  line-height: 1.45;
+}
+
+code {
+  background: rgba(22, 137, 106, 0.12);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+@media (max-width: 860px) {
+  .toolbar,
+  .profiles {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: 38vh;
+  }
+
+  .profiles {
+    top: auto;
+    bottom: 12px;
+  }
+
+  .hint {
+    display: none;
+  }
+
+  .inspector {
+    bottom: 41vh;
+    left: 12px;
+  }
+}
