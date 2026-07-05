@@ -1,4 +1,4 @@
-import type mapboxgl from "mapbox-gl";
+import mapboxgl from "mapbox-gl";
 import type { AnalysisRequest, DebugMode, LinkProfile } from "../../types";
 import {
   haversineDistanceM,
@@ -17,14 +17,14 @@ const rebuildDelayMs = 120;
 const vertexSource = `
 precision highp float;
 
-attribute vec2 a_mercator;
+attribute vec3 a_mercator;
 attribute vec2 a_uv;
 uniform mat4 u_matrix;
 varying vec2 v_uv;
 
 void main() {
   v_uv = a_uv;
-  gl_Position = u_matrix * vec4(a_mercator, 0.0, 1.0);
+  gl_Position = u_matrix * vec4(a_mercator, 1.0);
 }`;
 
 const fragmentSource = `
@@ -46,6 +46,7 @@ type CoverageBuild = {
 type RenderContext = {
   radiusM: number;
   radiusMercator: number;
+  elevationMercator: number;
   textureSize: number;
 };
 
@@ -163,6 +164,7 @@ export class CoverageRenderer {
     const context = renderContext(request, debugMode);
     const radiusMercator = metersToMercatorUnits(context.radiusM, request.operator.lat);
     context.radiusMercator = radiusMercator;
+    context.elevationMercator = coveragePlaneMercatorZ(map, request, operator, radiusMercator);
 
     if (this.dirty && (this.textureSize === 0 || performance.now() >= this.rebuildAfter)) {
       const build = this.buildCoverage(map, request, debugMode, operator, context);
@@ -201,29 +203,36 @@ export class CoverageRenderer {
     const maxX = operator.x + radiusMercator;
     const minY = operator.y - radiusMercator;
     const maxY = operator.y + radiusMercator;
+    const z = context.elevationMercator;
     const vertices = new Float32Array([
       minX,
       maxY,
+      z,
       0,
       0,
       maxX,
       maxY,
+      z,
       1,
       0,
       minX,
       minY,
+      z,
       0,
       1,
       minX,
       minY,
+      z,
       0,
       1,
       maxX,
       maxY,
+      z,
       1,
       0,
       maxX,
       minY,
+      z,
       1,
       1,
     ]);
@@ -232,9 +241,9 @@ export class CoverageRenderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
     gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(this.attribMercator);
-    gl.vertexAttribPointer(this.attribMercator, 2, gl.FLOAT, false, 16, 0);
+    gl.vertexAttribPointer(this.attribMercator, 3, gl.FLOAT, false, 20, 0);
     gl.enableVertexAttribArray(this.attribUv);
-    gl.vertexAttribPointer(this.attribUv, 2, gl.FLOAT, false, 16, 8);
+    gl.vertexAttribPointer(this.attribUv, 2, gl.FLOAT, false, 20, 12);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.uniform1i(this.uniforms.u_coverage, 0);
@@ -389,8 +398,39 @@ function renderContext(request: AnalysisRequest, debugMode: DebugMode): RenderCo
   return {
     radiusM,
     radiusMercator: 0,
+    elevationMercator: 0,
     textureSize: coverageTextureSizeFor(radiusM, request.gridResolutionM),
   };
+}
+
+function coveragePlaneMercatorZ(
+  map: mapboxgl.Map,
+  request: AnalysisRequest,
+  operator: { x: number; y: number },
+  radiusMercator: number,
+): number {
+  const sampleOffsets = [
+    [0, 0],
+    [0.7, 0],
+    [-0.7, 0],
+    [0, 0.7],
+    [0, -0.7],
+  ];
+  const elevations = sampleOffsets.map(([dx, dy]) =>
+    terrainElevation(
+      map,
+      mercator01ToLngLat({
+        x: operator.x + dx * radiusMercator,
+        y: operator.y + dy * radiusMercator,
+      }),
+    ),
+  );
+  const finite = elevations.filter(Number.isFinite);
+  const elevationM =
+    finite.length > 0
+      ? finite.reduce((sum, value) => sum + value, 0) / finite.length
+      : terrainElevation(map, request.operator);
+  return mapboxgl.MercatorCoordinate.fromLngLat(request.operator, elevationM + 2).z;
 }
 
 export { maxRfAnalysisRadiusM };
