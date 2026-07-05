@@ -227,6 +227,31 @@ output {
   background: #ffffff;
 }
 
+.profile-card-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.profile-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+.profile-card-summary .disclosure-icon {
+  margin-left: auto;
+}
+
+.profile-card[open] .profile-card-summary .disclosure-icon {
+  transform: rotate(180deg);
+}
+
+.profile-card .profile-grid {
+  margin-top: 10px;
+}
+
 .config-menu {
   margin-top: 12px;
 }
@@ -280,6 +305,9 @@ output {
   grid-template-columns: 18px 1fr;
   align-items: center;
   margin-top: 0;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
 }
 
 .check-row input {

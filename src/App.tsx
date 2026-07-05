@@ -548,8 +548,9 @@ export function App() {
           <ChevronDown className="disclosure-icon" size={16} />
         </summary>
         {analysis.profiles.map((profile) => (
-          <section className="profile-card" key={profile.id}>
-            <label className="check-row">
+          <details className="profile-card" key={profile.id} open>
+            <summary className="profile-card-summary">
+              <label className="check-row" onClick={(event) => event.stopPropagation()}>
               <input
                 type="checkbox"
                 checked={analysis.selectedProfileIds.includes(profile.id)}
@@ -557,6 +558,8 @@ export function App() {
               />
               <strong>{profileLabel(profile.id)}</strong>
             </label>
+              <ChevronDown className="disclosure-icon" size={16} />
+            </summary>
             <div className="profile-grid">
               <label>
                 Frequency
@@ -617,6 +620,24 @@ export function App() {
                 </span>
               </label>
               <label>
+                TX loss
+                <span className="input-with-unit">
+                  <input
+                    type="number"
+                    value={profile.txLossDb}
+                    onChange={(event) =>
+                      setAnalysis((current) => ({
+                        ...current,
+                        profiles: updateProfile(current.profiles, profile.id, {
+                          txLossDb: Number(event.target.value),
+                        }),
+                      }))
+                    }
+                  />
+                  <span>dB</span>
+                </span>
+              </label>
+              <label>
                 RX antenna gain
                 <span className="input-with-unit">
                   <input
@@ -632,6 +653,24 @@ export function App() {
                     }
                   />
                   <span>dBi</span>
+                </span>
+              </label>
+              <label>
+                RX loss
+                <span className="input-with-unit">
+                  <input
+                    type="number"
+                    value={profile.rxLossDb}
+                    onChange={(event) =>
+                      setAnalysis((current) => ({
+                        ...current,
+                        profiles: updateProfile(current.profiles, profile.id, {
+                          rxLossDb: Number(event.target.value),
+                        }),
+                      }))
+                    }
+                  />
+                  <span>dB</span>
                 </span>
               </label>
               <label>
@@ -671,7 +710,7 @@ export function App() {
                 </span>
               </label>
             </div>
-          </section>
+          </details>
         ))}
       </details>
 
