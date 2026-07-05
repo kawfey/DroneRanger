@@ -34,27 +34,32 @@ export class LosCoverageLayer implements mapboxgl.CustomLayerInterface {
     this.renderer = new CoverageRenderer(gl as WebGL2RenderingContext);
   }
 
-  render(): void {
-    this.renderer?.render(this.request, this.debugMode);
+  render(_gl: WebGLRenderingContext, matrix: number[]): void {
+    if (!this.map) return;
+    this.renderer?.render(this.map, this.request, this.debugMode, matrix);
   }
 
   setOperator(operator: AnalysisRequest["operator"]): void {
     this.request = { ...this.request, operator };
+    this.renderer?.markDirty();
     this.map?.triggerRepaint();
   }
 
   setProfiles(profiles: LinkProfile[], selectedProfileIds = this.request.selectedProfileIds): void {
     this.request = { ...this.request, profiles, selectedProfileIds };
+    this.renderer?.markDirty();
     this.map?.triggerRepaint();
   }
 
   setAnalysisArea(area: Pick<AnalysisRequest, "radiusM" | "gridResolutionM" | "altitude">): void {
     this.request = { ...this.request, ...area };
+    this.renderer?.markDirty();
     this.map?.triggerRepaint();
   }
 
   setDebugMode(debugMode: DebugMode): void {
     this.debugMode = debugMode;
+    this.renderer?.markDirty();
     this.map?.triggerRepaint();
   }
 
@@ -62,6 +67,7 @@ export class LosCoverageLayer implements mapboxgl.CustomLayerInterface {
     if (!this.map) return;
     this.terrain.refresh(this.map);
     this.obstacles.forEach((source) => source.refresh(this.map!));
+    this.renderer?.markDirty();
     this.map.triggerRepaint();
   }
 

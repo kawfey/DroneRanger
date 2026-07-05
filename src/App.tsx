@@ -38,6 +38,7 @@ export function App() {
   const [analysis, setAnalysis] = useState<AnalysisRequest>(defaultAnalysis);
   const [debugMode, setDebugMode] = useState<DebugMode>("combined");
   const [inspector, setInspector] = useState<CoveragePixel | null>(null);
+  const analysisRef = useRef(analysis);
   const hasToken = Boolean(token && token !== "pk.your_mapbox_token_here");
 
   const activeProfiles = useMemo(
@@ -80,13 +81,19 @@ export function App() {
         }));
         return;
       }
-      setInspector(inspectFlatEarthPixel(analysis, event.lngLat));
+      setInspector(inspectFlatEarthPixel(analysisRef.current, event.lngLat));
     });
 
     map.on("load", () => {
       const layer = new LosCoverageLayer(analysis, debugMode);
       layerRef.current = layer;
       map.addLayer(layer);
+      map.on("moveend", () => layer.refreshSources());
+      map.on("sourcedata", () => {
+        if (map.isSourceLoaded("mapbox-dem")) {
+          layer.refreshSources();
+        }
+      });
     });
 
     return () => {
@@ -98,6 +105,7 @@ export function App() {
   }, [hasToken]);
 
   useEffect(() => {
+    analysisRef.current = analysis;
     markerRef.current?.setLngLat([analysis.operator.lng, analysis.operator.lat]);
     layerRef.current?.setOperator(analysis.operator);
     layerRef.current?.setProfiles(analysis.profiles, analysis.selectedProfileIds);

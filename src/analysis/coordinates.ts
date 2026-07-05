@@ -13,6 +13,13 @@ export function lngLatToMercator01(lng: number, lat: number): WebMercator {
   return { x, y };
 }
 
+export function mercator01ToLngLat(point: WebMercator): { lng: number; lat: number } {
+  const lng = point.x * 360 - 180;
+  const y = 0.5 - point.y;
+  const lat = 90 - (360 * Math.atan(Math.exp(-y * 2 * Math.PI))) / Math.PI;
+  return { lng, lat };
+}
+
 export function metersToMercatorUnits(meters: number, lat: number): number {
   return meters / (earthCircumferenceM * Math.cos((lat * Math.PI) / 180));
 }

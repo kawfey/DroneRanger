@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { haversineDistanceM, lngLatToMercator01, metersToMercatorUnits } from "./coordinates";
+import {
+  haversineDistanceM,
+  lngLatToMercator01,
+  mercator01ToLngLat,
+  metersToMercatorUnits,
+} from "./coordinates";
 
 describe("coordinates", () => {
   it("maps lng/lat origin to web mercator center", () => {
@@ -8,6 +13,13 @@ describe("coordinates", () => {
 
   it("converts meters to mercator units at equator", () => {
     expect(metersToMercatorUnits(1000, 0)).toBeCloseTo(0.00002495, 8);
+  });
+
+  it("round-trips web mercator coordinates", () => {
+    const original = { lng: -3.7038, lat: 40.4168 };
+    const roundTrip = mercator01ToLngLat(lngLatToMercator01(original.lng, original.lat));
+    expect(roundTrip.lng).toBeCloseTo(original.lng, 8);
+    expect(roundTrip.lat).toBeCloseTo(original.lat, 8);
   });
 
   it("computes short haversine distances", () => {
