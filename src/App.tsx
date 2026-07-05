@@ -188,7 +188,6 @@ export function App() {
       const layer = new LosCoverageLayer(analysis, debugMode);
       layerRef.current = layer;
       map.addLayer(layer, "reference-radius-line");
-      map.on("moveend", () => layer.refreshSources());
       map.once("idle", () => layer.refreshSources());
     });
 
@@ -248,7 +247,7 @@ export function App() {
         <div className="panel-title">
           <Antenna size={18} />
           <span>LOS Range</span>
-          <button type="button" title="Refresh sources" onClick={() => layerRef.current?.refreshSources()}>
+          <button type="button" title="Resample terrain" onClick={() => layerRef.current?.refreshSources()}>
             <RefreshCw size={16} />
           </button>
         </div>
