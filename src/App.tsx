@@ -1,6 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import mapboxgl from "mapbox-gl";
-import { Activity, Antenna, Layers, MapPin, Radio, RefreshCw, Settings } from "lucide-react";
+import {
+  Activity,
+  Antenna,
+  ChevronDown,
+  Layers,
+  MapPin,
+  Radio,
+  RefreshCw,
+  Settings,
+} from "lucide-react";
 import { defaultAnalysis } from "./analysis/defaults";
 import { inspectFlatEarthPixel } from "./analysis/singleRay";
 import { LosCoverageLayer } from "./vendor/shademap";
@@ -11,14 +20,29 @@ const token = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
 const minGridResolutionM = 5;
 const maxGridResolutionM = 500;
 
+type MapStyleTemplate = {
+  id: string;
+  label: string;
+  uri: string;
+};
+
+const mapStyleTemplates: MapStyleTemplate[] = [
+  { id: "satellite-streets", label: "Satellite", uri: "mapbox://styles/mapbox/satellite-streets-v12" },
+  { id: "streets", label: "Streets", uri: "mapbox://styles/mapbox/streets-v12" },
+  { id: "outdoors", label: "Outdoors", uri: "mapbox://styles/mapbox/outdoors-v12" },
+  { id: "light", label: "Light", uri: "mapbox://styles/mapbox/light-v11" },
+  { id: "dark", label: "Dark", uri: "mapbox://styles/mapbox/dark-v11" },
+  { id: "navigation-day", label: "Nav Day", uri: "mapbox://styles/mapbox/navigation-day-v1" },
+  { id: "navigation-night", label: "Nav Night", uri: "mapbox://styles/mapbox/navigation-night-v1" },
+  { id: "standard", label: "Standard", uri: "mapbox://styles/mapbox/standard" },
+];
+
 const debugModes: Array<{ id: DebugMode; label: string }> = [
   { id: "combined", label: "Combined" },
   { id: "control", label: "Control" },
   { id: "telemetry", label: "Telemetry" },
   { id: "video", label: "Video" },
-  { id: "los", label: "LOS" },
-  { id: "margin", label: "Margin" },
-  { id: "shademap", label: "ShadeMap" },
+  { id: "los", label: "Line of Sight" },
 ];
 
 type ReferenceCircleFeature = {
@@ -32,6 +56,14 @@ type ReferenceCircleFeature = {
 
 function profileLabel(id: LinkProfileId): string {
   return id[0].toUpperCase() + id.slice(1);
+}
+
+function debugModeLabel(debugMode: DebugMode): string {
+  return debugModes.find((mode) => mode.id === debugMode)?.label ?? "Combined";
+}
+
+function modeMarginLabel(debugMode: DebugMode): string {
+  return `${debugModeLabel(debugMode)} margin`;
 }
 
 function updateProfile(
@@ -96,6 +128,57 @@ function updateReferenceCircle(map: mapboxgl.Map, analysis: AnalysisRequest): vo
   source?.setData(referenceCircleFeature(analysis.operator, analysis.radiusM));
 }
 
+function stylePreviewUrl(style: MapStyleTemplate): string {
+  const path = style.uri.replace("mapbox://styles/", "");
+  return `https://api.mapbox.com/styles/v1/${path}/static/-3.7038,40.4168,11,0/104x104?access_token=${token}`;
+}
+
+function installAnalysisLayers(
+  map: mapboxgl.Map,
+  analysis: AnalysisRequest,
+  debugMode: DebugMode,
+  layerRef: MutableRefObject<LosCoverageLayer | null>,
+): void {
+  if (!map.getSource("reference-radius")) {
+    map.addSource("reference-radius", {
+      type: "geojson",
+      data: referenceCircleFeature(analysis.operator, analysis.radiusM),
+    });
+  } else {
+    updateReferenceCircle(map, analysis);
+  }
+
+  if (!map.getLayer("reference-radius-fill")) {
+    map.addLayer({
+      id: "reference-radius-fill",
+      type: "fill",
+      source: "reference-radius",
+      paint: {
+        "fill-color": "#1f8fff",
+        "fill-opacity": 0.04,
+      },
+    });
+  }
+
+  if (!map.getLayer("reference-radius-line")) {
+    map.addLayer({
+      id: "reference-radius-line",
+      type: "line",
+      source: "reference-radius",
+      paint: {
+        "line-color": "#1f8fff",
+        "line-width": 2,
+        "line-opacity": 0.9,
+      },
+    });
+  }
+
+  const layer = new LosCoverageLayer(analysis, debugMode);
+  layerRef.current = layer;
+  map.addLayer(layer, "reference-radius-line");
+  map.once("idle", () => layer.refreshSources());
+}
+
 function operatorFromLngLat(
   current: AnalysisRequest,
   lngLat: mapboxgl.LngLat,
@@ -112,11 +195,17 @@ export function App() {
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const layerRef = useRef<LosCoverageLayer | null>(null);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
+  const previousStyleUriRef = useRef(mapStyleTemplates[0].uri);
   const [analysis, setAnalysis] = useState<AnalysisRequest>(defaultAnalysis);
   const [debugMode, setDebugMode] = useState<DebugMode>("combined");
   const [inspector, setInspector] = useState<CoveragePixel | null>(null);
-  const analysisRef = useRef(analysis);
+  const [inspectorTarget, setInspectorTarget] = useState<{ lng: number; lat: number } | null>(null);
+  const [selectedStyleId, setSelectedStyleId] = useState(mapStyleTemplates[0].id);
+  const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
   const hasToken = Boolean(token && token !== "pk.your_mapbox_token_here");
+  const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? mapStyleTemplates[0];
+  const latestAnalysisRef = useRef(analysis);
+  const latestDebugModeRef = useRef(debugMode);
 
   const activeProfiles = useMemo(
     () => analysis.profiles.filter((profile) => analysis.selectedProfileIds.includes(profile.id)),
@@ -136,7 +225,7 @@ export function App() {
     mapboxgl.accessToken = token!;
     const map = new mapboxgl.Map({
       container: mapNodeRef.current,
-      style: "mapbox://styles/mapbox/satellite-streets-v12",
+      style: selectedStyle.uri,
       center: [analysis.operator.lng, analysis.operator.lat],
       zoom: 13.5,
       pitch: 0,
@@ -188,37 +277,11 @@ export function App() {
         placeOperator(event.lngLat);
         return;
       }
-      setInspector(inspectFlatEarthPixel(analysisRef.current, event.lngLat));
+      setInspectorTarget({ lng: event.lngLat.lng, lat: event.lngLat.lat });
     });
 
     map.on("load", () => {
-      map.addSource("reference-radius", {
-        type: "geojson",
-        data: referenceCircleFeature(analysis.operator, analysis.radiusM),
-      });
-      map.addLayer({
-        id: "reference-radius-fill",
-        type: "fill",
-        source: "reference-radius",
-        paint: {
-          "fill-color": "#1f8fff",
-          "fill-opacity": 0.04,
-        },
-      });
-      map.addLayer({
-        id: "reference-radius-line",
-        type: "line",
-        source: "reference-radius",
-        paint: {
-          "line-color": "#1f8fff",
-          "line-width": 2,
-          "line-opacity": 0.9,
-        },
-      });
-      const layer = new LosCoverageLayer(analysis, debugMode);
-      layerRef.current = layer;
-      map.addLayer(layer, "reference-radius-line");
-      map.once("idle", () => layer.refreshSources());
+      installAnalysisLayers(map, analysis, debugMode, layerRef);
     });
 
     return () => {
@@ -230,7 +293,7 @@ export function App() {
   }, [hasToken]);
 
   useEffect(() => {
-    analysisRef.current = analysis;
+    latestAnalysisRef.current = analysis;
     markerRef.current?.setLngLat([analysis.operator.lng, analysis.operator.lat]);
     if (mapRef.current?.isStyleLoaded()) {
       updateReferenceCircle(mapRef.current, analysis);
@@ -239,8 +302,27 @@ export function App() {
   }, [analysis]);
 
   useEffect(() => {
+    latestDebugModeRef.current = debugMode;
     layerRef.current?.setDebugMode(debugMode);
   }, [debugMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !hasToken) return;
+    if (previousStyleUriRef.current === selectedStyle.uri) return;
+    previousStyleUriRef.current = selectedStyle.uri;
+    layerRef.current = null;
+    map.setStyle(selectedStyle.uri);
+    map.once("style.load", () =>
+      installAnalysisLayers(map, latestAnalysisRef.current, latestDebugModeRef.current, layerRef),
+    );
+  }, [hasToken, selectedStyle.uri]);
+
+  useEffect(() => {
+    setInspector(
+      inspectorTarget ? inspectFlatEarthPixel(analysis, inspectorTarget, debugMode) : null,
+    );
+  }, [analysis, debugMode, inspectorTarget]);
 
   function setNumber(path: "radiusM" | "gridResolutionM", value: number) {
     setAnalysis((current) => ({ ...current, [path]: value }));
@@ -260,6 +342,11 @@ export function App() {
         : [...current.selectedProfileIds, id];
       return { ...current, selectedProfileIds: selected };
     });
+  }
+
+  function selectStyle(style: MapStyleTemplate) {
+    setSelectedStyleId(style.id);
+    setIsStyleMenuOpen(false);
   }
 
   return (
@@ -338,10 +425,25 @@ export function App() {
           </label>
         </div>
 
-        <details className="config-menu" open>
+        <label>
+          Coverage mode
+          <select
+            value={debugMode}
+            onChange={(event) => setDebugMode(event.target.value as DebugMode)}
+          >
+            {debugModes.map((mode) => (
+              <option key={mode.id} value={mode.id}>
+                {mode.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <details className="config-menu">
           <summary>
             <Settings size={16} />
-            <span>Calculation</span>
+            <span>Calculation settings</span>
+            <ChevronDown className="disclosure-icon" size={16} />
           </summary>
 
           <div className="segmented two" role="radiogroup" aria-label="Calculation range">
@@ -413,19 +515,6 @@ export function App() {
             </output>
           </label>
         </details>
-
-        <div className="segmented" role="tablist" aria-label="Coverage mode">
-          {debugModes.map((mode) => (
-            <button
-              key={mode.id}
-              type="button"
-              className={debugMode === mode.id ? "active" : ""}
-              onClick={() => setDebugMode(mode.id)}
-            >
-              {mode.label}
-            </button>
-          ))}
-        </div>
       </aside>
 
       <aside className="profiles" aria-label="RF profiles">
@@ -515,7 +604,7 @@ export function App() {
           <div className="panel-title">
             <Activity size={18} />
             <span>Inspector</span>
-            <button type="button" title="Close inspector" onClick={() => setInspector(null)}>
+            <button type="button" title="Close inspector" onClick={() => setInspectorTarget(null)}>
               x
             </button>
           </div>
@@ -524,11 +613,55 @@ export function App() {
             <dd>{inspector.reachable ? "Yes" : "No"}</dd>
             <dt>Required altitude</dt>
             <dd>{inspector.requiredAltitudeM.toFixed(1)} m</dd>
+            {debugMode !== "combined" && debugMode !== "los" && inspector.modeMarginDb !== null && (
+              <>
+                <dt>{modeMarginLabel(debugMode)}</dt>
+                <dd>{inspector.modeMarginDb.toFixed(1)} dB</dd>
+              </>
+            )}
             <dt>Combined margin</dt>
-            <dd>{inspector.marginDb.toFixed(1)} dB</dd>
+            <dd>{inspector.combinedMarginDb.toFixed(1)} dB</dd>
             <dt>Distance</dt>
             <dd>{inspector.debugValue.toFixed(0)} m</dd>
           </dl>
+        </aside>
+      )}
+
+      {hasToken && (
+        <aside className={`style-picker ${isStyleMenuOpen ? "open" : ""}`} aria-label="Map style selector">
+          {isStyleMenuOpen && (
+            <div className="style-menu" role="listbox" aria-label="Map styles">
+              {mapStyleTemplates.map((style) => (
+                <button
+                  type="button"
+                  key={style.id}
+                  className={`style-option ${style.id === selectedStyle.id ? "active" : ""}`}
+                  onClick={() => selectStyle(style)}
+                  role="option"
+                  aria-selected={style.id === selectedStyle.id}
+                  title={style.label}
+                >
+                  <span
+                    className="style-preview"
+                    style={{ backgroundImage: `url("${stylePreviewUrl(style)}")` }}
+                  />
+                  <span>{style.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            className="style-current"
+            onClick={() => setIsStyleMenuOpen((open) => !open)}
+            aria-expanded={isStyleMenuOpen}
+            title={`Map style: ${selectedStyle.label}`}
+          >
+            <span
+              className="style-preview"
+              style={{ backgroundImage: `url("${stylePreviewUrl(selectedStyle)}")` }}
+            />
+          </button>
         </aside>
       )}
 

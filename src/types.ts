@@ -49,14 +49,14 @@ export type DebugMode =
   | "telemetry"
   | "video"
   | "los"
-  | "margin"
   | "blocker"
   | "shademap";
 
 export type CoveragePixel = {
   requiredAltitudeM: number;
   reachable: boolean;
-  marginDb: number;
+  combinedMarginDb: number;
+  modeMarginDb: number | null;
   profileMask: number;
   debugValue: number;
 };

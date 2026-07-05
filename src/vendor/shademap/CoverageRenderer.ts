@@ -114,15 +114,6 @@ function altitudeColor(requiredAltitudeM: number, request: AnalysisRequest): [nu
   ];
 }
 
-function marginColor(marginDb: number): [number, number, number] {
-  const t = Math.max(0, Math.min(1, (marginDb + 12) / 36));
-  return [
-    Math.round(217 + (26 - 217) * t),
-    Math.round(26 + (191 - 26) * t),
-    Math.round(20 + (71 - 20) * t),
-  ];
-}
-
 export class CoverageRenderer {
   private program: WebGLProgram;
   private buffer: WebGLBuffer;
@@ -328,8 +319,6 @@ export class CoverageRenderer {
         let color: [number, number, number];
         if (debugMode === "los") {
           color = requiredAltitudeM <= request.altitude.maxM ? [26, 179, 255] : [242, 242, 242];
-        } else if (debugMode === "margin") {
-          color = marginColor(marginDb);
         } else if (debugMode === "blocker" || debugMode === "shademap") {
           const t = Math.max(0, Math.min(1, (blockerElevationM - operatorTerrain + 80) / 260));
           color = [Math.round(90 + 130 * t), Math.round(70 + 40 * t), Math.round(170 + 40 * t)];
@@ -380,7 +369,7 @@ export function analysisRadiusM(request: AnalysisRequest, debugMode: DebugMode):
   }
   const profiles = selectedProfilesForMode(request, debugMode);
   const rfRange =
-    debugMode === "combined" || debugMode === "margin"
+    debugMode === "combined"
       ? combinedMaxFreeSpaceRangeM(profiles)
       : profiles[0]
         ? maxFreeSpaceRangeM(profiles[0])
