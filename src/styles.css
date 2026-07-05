@@ -115,6 +115,26 @@ select {
   color: #17202a;
 }
 
+.input-with-unit {
+  position: relative;
+  display: block;
+}
+
+.input-with-unit input {
+  padding-right: 42px;
+}
+
+.input-with-unit span {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  transform: translateY(-50%);
+  color: #61707d;
+  font-size: 0.76rem;
+  font-weight: 760;
+  pointer-events: none;
+}
+
 select {
   cursor: pointer;
 }
@@ -141,6 +161,8 @@ output {
 
 .profile-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 8px;
+  row-gap: 2px;
 }
 
 .segmented {

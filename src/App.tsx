@@ -392,44 +392,56 @@ export function App() {
 
         <label>
           Operator antenna
-          <input
-            type="number"
-            min="0"
-            step="0.5"
-            value={analysis.operator.antennaHeightM}
-            onChange={(event) =>
-              setAnalysis((current) => ({
-                ...current,
-                operator: { ...current.operator, antennaHeightM: Number(event.target.value) },
-              }))
-            }
-          />
+          <span className="input-with-unit">
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              value={analysis.operator.antennaHeightM}
+              onChange={(event) =>
+                setAnalysis((current) => ({
+                  ...current,
+                  operator: { ...current.operator, antennaHeightM: Number(event.target.value) },
+                }))
+              }
+            />
+            <span>m</span>
+          </span>
         </label>
 
         <div className="grid-three">
           <label>
             Min alt
-            <input
-              type="number"
-              value={analysis.altitude.minM}
-              onChange={(event) => setAltitude("minM", Number(event.target.value))}
-            />
+            <span className="input-with-unit">
+              <input
+                type="number"
+                value={analysis.altitude.minM}
+                onChange={(event) => setAltitude("minM", Number(event.target.value))}
+              />
+              <span>m</span>
+            </span>
           </label>
           <label>
             Max alt
-            <input
-              type="number"
-              value={analysis.altitude.maxM}
-              onChange={(event) => setAltitude("maxM", Number(event.target.value))}
-            />
+            <span className="input-with-unit">
+              <input
+                type="number"
+                value={analysis.altitude.maxM}
+                onChange={(event) => setAltitude("maxM", Number(event.target.value))}
+              />
+              <span>m</span>
+            </span>
           </label>
           <label>
             Step
-            <input
-              type="number"
-              value={analysis.altitude.stepM}
-              onChange={(event) => setAltitude("stepM", Number(event.target.value))}
-            />
+            <span className="input-with-unit">
+              <input
+                type="number"
+                value={analysis.altitude.stepM}
+                onChange={(event) => setAltitude("stepM", Number(event.target.value))}
+              />
+              <span>m</span>
+            </span>
           </label>
         </div>
 
@@ -483,22 +495,25 @@ export function App() {
 
           <label>
             Calculation range
-            <input
-              type="number"
-              min="250"
-              step="250"
-              value={analysis.calculationRange.manualM}
-              disabled={analysis.calculationRange.mode === "auto"}
-              onChange={(event) =>
-                setAnalysis((current) => ({
-                  ...current,
-                  calculationRange: {
-                    mode: current.calculationRange.mode,
-                    manualM: Number(event.target.value),
-                  },
-                }))
-              }
-            />
+            <span className="input-with-unit">
+              <input
+                type="number"
+                min="250"
+                step="250"
+                value={analysis.calculationRange.manualM}
+                disabled={analysis.calculationRange.mode === "auto"}
+                onChange={(event) =>
+                  setAnalysis((current) => ({
+                    ...current,
+                    calculationRange: {
+                      mode: current.calculationRange.mode,
+                      manualM: Number(event.target.value),
+                    },
+                  }))
+                }
+              />
+              <span>m</span>
+            </span>
             <output>
               {analysis.calculationRange.mode === "auto"
                 ? `${Math.round(effectiveCalculationRadiusM).toLocaleString()} m auto`
@@ -543,68 +558,80 @@ export function App() {
             </label>
             <div className="profile-grid">
               <label>
-                MHz
-                <input
-                  type="number"
-                  value={profile.frequencyMHz}
-                  onChange={(event) =>
-                    setAnalysis((current) => ({
-                      ...current,
-                      profiles: updateProfile(current.profiles, profile.id, {
-                        frequencyMHz: Number(event.target.value),
-                      }),
-                    }))
-                  }
-                />
+                Frequency
+                <span className="input-with-unit">
+                  <input
+                    type="number"
+                    value={profile.frequencyMHz}
+                    onChange={(event) =>
+                      setAnalysis((current) => ({
+                        ...current,
+                        profiles: updateProfile(current.profiles, profile.id, {
+                          frequencyMHz: Number(event.target.value),
+                        }),
+                      }))
+                    }
+                  />
+                  <span>MHz</span>
+                </span>
               </label>
               <label>
-                TX power (mW)
-                <input
-                  type="number"
-                  min="0.001"
-                  step="1"
-                  value={Number(dbmToMw(profile.txPowerDbm).toFixed(2))}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (!Number.isFinite(value) || value <= 0) return;
-                    setAnalysis((current) => ({
-                      ...current,
-                      profiles: updateProfile(current.profiles, profile.id, {
-                        txPowerDbm: mwToDbm(value),
-                      }),
-                    }));
-                  }}
-                />
+                TX power
+                <span className="input-with-unit">
+                  <input
+                    type="number"
+                    min="0.001"
+                    step="1"
+                    value={Number(dbmToMw(profile.txPowerDbm).toFixed(2))}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      if (!Number.isFinite(value) || value <= 0) return;
+                      setAnalysis((current) => ({
+                        ...current,
+                        profiles: updateProfile(current.profiles, profile.id, {
+                          txPowerDbm: mwToDbm(value),
+                        }),
+                      }));
+                    }}
+                  />
+                  <span>mW</span>
+                </span>
               </label>
               <label>
-                Sens.
-                <input
-                  type="number"
-                  value={profile.rxSensitivityDbm}
-                  onChange={(event) =>
-                    setAnalysis((current) => ({
-                      ...current,
-                      profiles: updateProfile(current.profiles, profile.id, {
-                        rxSensitivityDbm: Number(event.target.value),
-                      }),
-                    }))
-                  }
-                />
+                Sensitivity
+                <span className="input-with-unit">
+                  <input
+                    type="number"
+                    value={profile.rxSensitivityDbm}
+                    onChange={(event) =>
+                      setAnalysis((current) => ({
+                        ...current,
+                        profiles: updateProfile(current.profiles, profile.id, {
+                          rxSensitivityDbm: Number(event.target.value),
+                        }),
+                      }))
+                    }
+                  />
+                  <span>dBm</span>
+                </span>
               </label>
               <label>
-                Margin
-                <input
-                  type="number"
-                  value={profile.requiredMarginDb}
-                  onChange={(event) =>
-                    setAnalysis((current) => ({
-                      ...current,
-                      profiles: updateProfile(current.profiles, profile.id, {
-                        requiredMarginDb: Number(event.target.value),
-                      }),
-                    }))
-                  }
-                />
+                Link Margin
+                <span className="input-with-unit">
+                  <input
+                    type="number"
+                    value={profile.requiredMarginDb}
+                    onChange={(event) =>
+                      setAnalysis((current) => ({
+                        ...current,
+                        profiles: updateProfile(current.profiles, profile.id, {
+                          requiredMarginDb: Number(event.target.value),
+                        }),
+                      }))
+                    }
+                  />
+                  <span>dB</span>
+                </span>
               </label>
             </div>
           </section>
