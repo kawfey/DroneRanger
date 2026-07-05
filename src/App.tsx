@@ -11,7 +11,7 @@ import {
   Settings,
 } from "lucide-react";
 import { defaultAnalysis } from "./analysis/defaults";
-import { inspectFlatEarthPixel } from "./analysis/singleRay";
+import { inspectFlatEarthPixel, inspectTerrainPixel } from "./analysis/singleRay";
 import { LosCoverageLayer } from "./vendor/shademap";
 import { analysisRadiusM, coverageTextureSizeFor } from "./vendor/shademap/CoverageRenderer";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile, LinkProfileId } from "./types";
@@ -210,7 +210,7 @@ export function App() {
   const [inspectorTarget, setInspectorTarget] = useState<{ lng: number; lat: number } | null>(null);
   const [selectedStyleId, setSelectedStyleId] = useState(mapStyleTemplates[0].id);
   const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
-  const hasToken = Boolean(token && token !== "pk.your_mapbox_token_here");
+  const hasToken = Boolean(token && token !== "your_mapbox_token_here");
   const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? mapStyleTemplates[0];
   const latestAnalysisRef = useRef(analysis);
   const latestDebugModeRef = useRef(debugMode);
@@ -327,8 +327,13 @@ export function App() {
   }, [hasToken, selectedStyle.uri]);
 
   useEffect(() => {
+    const map = mapRef.current;
     setInspector(
-      inspectorTarget ? inspectFlatEarthPixel(analysis, inspectorTarget, debugMode) : null,
+      inspectorTarget
+        ? map
+          ? inspectTerrainPixel(map, analysis, inspectorTarget, debugMode)
+          : inspectFlatEarthPixel(analysis, inspectorTarget, debugMode)
+        : null,
     );
   }, [analysis, debugMode, inspectorTarget]);
 
