@@ -54,10 +54,13 @@ export function App() {
       style: "mapbox://styles/mapbox/satellite-streets-v12",
       center: [analysis.operator.lng, analysis.operator.lat],
       zoom: 13.5,
-      pitch: 56,
-      bearing: -18,
+      pitch: 0,
+      bearing: 0,
       antialias: true,
     });
+    map.dragRotate.disable();
+    map.touchZoomRotate.disableRotation();
+    map.setMaxPitch(0);
 
     mapRef.current = map;
     markerRef.current = new mapboxgl.Marker({ draggable: true, color: "#1f8fff" })
