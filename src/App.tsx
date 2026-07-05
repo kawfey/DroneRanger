@@ -161,7 +161,7 @@ export function App() {
         </div>
 
         <label>
-          Radius
+          LOS radius
           <input
             type="range"
             min="250"

@@ -6,9 +6,11 @@ import {
   mercator01ToLngLat,
   metersToMercatorUnits,
 } from "../../analysis/coordinates";
-import { linkMarginDb } from "../../analysis/rf";
+import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "../../analysis/rf";
 
-const textureSize = 160;
+const minTextureSize = 64;
+const maxTextureSize = 384;
+const maxRfAnalysisRadiusM = 100000;
 const raySteps = 28;
 
 const vertexSource = `
@@ -36,7 +38,14 @@ void main() {
 
 type CoverageBuild = {
   data: Uint8Array;
+  size: number;
   terrainSamples: number;
+};
+
+type RenderContext = {
+  radiusM: number;
+  radiusMercator: number;
+  textureSize: number;
 };
 
 function compileShader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader {
@@ -116,6 +125,7 @@ export class CoverageRenderer {
   private program: WebGLProgram;
   private buffer: WebGLBuffer;
   private texture: WebGLTexture;
+  private textureSize = 0;
   private uniforms: Record<string, WebGLUniformLocation | null>;
   private attribMercator: number;
   private attribUv: number;
@@ -138,17 +148,6 @@ export class CoverageRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA,
-      textureSize,
-      textureSize,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      new Uint8Array(textureSize * textureSize * 4),
-    );
   }
 
   markDirty(): void {
@@ -158,23 +157,40 @@ export class CoverageRenderer {
   render(map: mapboxgl.Map, request: AnalysisRequest, debugMode: DebugMode, matrix: number[]): void {
     const gl = this.gl;
     const operator = lngLatToMercator01(request.operator.lng, request.operator.lat);
-    const radiusMercator = metersToMercatorUnits(request.radiusM, request.operator.lat);
+    const context = renderContext(request, debugMode);
+    const radiusMercator = metersToMercatorUnits(context.radiusM, request.operator.lat);
+    context.radiusMercator = radiusMercator;
 
     if (this.dirty) {
-      const build = this.buildCoverage(map, request, debugMode, operator, radiusMercator);
+      const build = this.buildCoverage(map, request, debugMode, operator, context);
       this.lastTerrainSamples = build.terrainSamples;
       gl.bindTexture(gl.TEXTURE_2D, this.texture);
-      gl.texSubImage2D(
-        gl.TEXTURE_2D,
-        0,
-        0,
-        0,
-        textureSize,
-        textureSize,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        build.data,
-      );
+      if (this.textureSize !== build.size) {
+        this.textureSize = build.size;
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA,
+          build.size,
+          build.size,
+          0,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          build.data,
+        );
+      } else {
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          0,
+          0,
+          build.size,
+          build.size,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          build.data,
+        );
+      }
       this.dirty = false;
     }
 
@@ -236,33 +252,32 @@ export class CoverageRenderer {
     request: AnalysisRequest,
     debugMode: DebugMode,
     operator: { x: number; y: number },
-    radiusMercator: number,
+    context: RenderContext,
   ): CoverageBuild {
-    const data = new Uint8Array(textureSize * textureSize * 4);
-    const selectedProfiles = request.profiles.filter((profile) =>
-      request.selectedProfileIds.includes(profile.id),
-    );
+    const size = context.textureSize;
+    const data = new Uint8Array(size * size * 4);
+    const selectedProfiles = selectedProfilesForMode(request, debugMode);
     const operatorLngLat = { lng: request.operator.lng, lat: request.operator.lat };
     const operatorTerrain = terrainElevation(map, operatorLngLat);
     const operatorAbsM = operatorTerrain + request.operator.antennaHeightM;
     let terrainSamples = Number.isFinite(operatorTerrain) ? 1 : 0;
 
-    for (let y = 0; y < textureSize; y++) {
-      for (let x = 0; x < textureSize; x++) {
-        const centeredX = (x + 0.5) / textureSize;
-        const centeredY = (y + 0.5) / textureSize;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const centeredX = (x + 0.5) / size;
+        const centeredY = (y + 0.5) / size;
         const dx = centeredX * 2 - 1;
         const dy = centeredY * 2 - 1;
         const unitDistance = Math.hypot(dx, dy);
-        const offset = (y * textureSize + x) * 4;
+        const offset = (y * size + x) * 4;
 
         if (unitDistance > 1) {
           continue;
         }
 
         const targetMercator = {
-          x: operator.x + dx * radiusMercator,
-          y: operator.y + dy * radiusMercator,
+          x: operator.x + dx * context.radiusMercator,
+          y: operator.y + dy * context.radiusMercator,
         };
         const targetLngLat = mercator01ToLngLat(targetMercator);
         const distanceM = haversineDistanceM(operatorLngLat, targetLngLat);
@@ -277,8 +292,8 @@ export class CoverageRenderer {
         for (let step = 1; step < raySteps; step++) {
           const t = step / raySteps;
           const sampleMercator = {
-            x: operator.x + dx * radiusMercator * t,
-            y: operator.y + dy * radiusMercator * t,
+            x: operator.x + dx * context.radiusMercator * t,
+            y: operator.y + dy * context.radiusMercator * t,
           };
           const sampleLngLat = mercator01ToLngLat(sampleMercator);
           const sampleTerrain = terrainElevation(map, sampleLngLat);
@@ -294,7 +309,7 @@ export class CoverageRenderer {
         const margins = selectedProfiles.map((profile) => linkMarginDb(distanceM, profile));
         const marginDb = margins.length > 0 ? Math.min(...margins) : 0;
         const reachable =
-          distanceM <= request.radiusM &&
+          distanceM <= context.radiusM &&
           requiredAltitudeM <= request.altitude.maxM &&
           marginDb >= 0;
 
@@ -317,7 +332,7 @@ export class CoverageRenderer {
       }
     }
 
-    return { data, terrainSamples };
+    return { data, size, terrainSamples };
   }
 
   getTerrainSampleCount(): number {
@@ -330,6 +345,48 @@ function terrainElevation(map: mapboxgl.Map, lngLat: { lng: number; lat: number 
   return typeof elevation === "number" && Number.isFinite(elevation) ? elevation : 0;
 }
 
-export const coverageTextureSize = textureSize;
+export function selectedProfilesForMode(
+  request: AnalysisRequest,
+  debugMode: DebugMode,
+): LinkProfile[] {
+  if (debugMode === "los" || debugMode === "blocker" || debugMode === "shademap") {
+    return [];
+  }
+  if (debugMode === "control" || debugMode === "telemetry" || debugMode === "video") {
+    const profile = request.profiles.find((item) => item.id === debugMode);
+    return profile ? [profile] : [];
+  }
+  return request.profiles.filter((profile) => request.selectedProfileIds.includes(profile.id));
+}
+
+export function analysisRadiusM(request: AnalysisRequest, debugMode: DebugMode): number {
+  if (debugMode === "los" || debugMode === "blocker" || debugMode === "shademap") {
+    return request.radiusM;
+  }
+  const profiles = selectedProfilesForMode(request, debugMode);
+  const rfRange =
+    debugMode === "combined" || debugMode === "margin"
+      ? combinedMaxFreeSpaceRangeM(profiles)
+      : profiles[0]
+        ? maxFreeSpaceRangeM(profiles[0])
+        : request.radiusM;
+  return Math.max(250, Math.min(maxRfAnalysisRadiusM, rfRange || request.radiusM));
+}
+
+export function coverageTextureSizeFor(radiusM: number, gridResolutionM: number): number {
+  const requested = Math.ceil((radiusM * 2) / Math.max(1, gridResolutionM));
+  return Math.max(minTextureSize, Math.min(maxTextureSize, requested));
+}
+
+function renderContext(request: AnalysisRequest, debugMode: DebugMode): RenderContext {
+  const radiusM = analysisRadiusM(request, debugMode);
+  return {
+    radiusM,
+    radiusMercator: 0,
+    textureSize: coverageTextureSizeFor(radiusM, request.gridResolutionM),
+  };
+}
+
+export { maxRfAnalysisRadiusM };
 export const terrainRaySteps = raySteps;
 export { profileBudget };
