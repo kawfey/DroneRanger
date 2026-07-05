@@ -208,12 +208,14 @@ export function App() {
   const [debugMode, setDebugMode] = useState<DebugMode>("combined");
   const [inspector, setInspector] = useState<CoveragePixel | null>(null);
   const [inspectorTarget, setInspectorTarget] = useState<{ lng: number; lat: number } | null>(null);
+  const [mapDataRevision, setMapDataRevision] = useState(0);
   const [selectedStyleId, setSelectedStyleId] = useState(mapStyleTemplates[0].id);
   const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
   const hasToken = Boolean(token && token !== "your_mapbox_token_here");
   const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? mapStyleTemplates[0];
   const latestAnalysisRef = useRef(analysis);
   const latestDebugModeRef = useRef(debugMode);
+  const latestInspectorTargetRef = useRef(inspectorTarget);
 
   const activeProfiles = useMemo(
     () => analysis.profiles.filter((profile) => analysis.selectedProfileIds.includes(profile.id)),
@@ -291,6 +293,11 @@ export function App() {
     map.on("load", () => {
       installAnalysisLayers(map, analysis, debugMode, layerRef);
     });
+    map.on("idle", () => {
+      if (latestInspectorTargetRef.current) {
+        setMapDataRevision((revision) => revision + 1);
+      }
+    });
 
     return () => {
       layerRef.current = null;
@@ -299,6 +306,10 @@ export function App() {
       mapRef.current = null;
     };
   }, [hasToken]);
+
+  useEffect(() => {
+    latestInspectorTargetRef.current = inspectorTarget;
+  }, [inspectorTarget]);
 
   useEffect(() => {
     latestAnalysisRef.current = analysis;
@@ -335,7 +346,7 @@ export function App() {
           : inspectFlatEarthPixel(analysis, inspectorTarget, debugMode)
         : null,
     );
-  }, [analysis, debugMode, inspectorTarget]);
+  }, [analysis, debugMode, inspectorTarget, mapDataRevision]);
 
   function setNumber(path: "radiusM" | "gridResolutionM", value: number) {
     setAnalysis((current) => ({ ...current, [path]: value }));
@@ -377,7 +388,14 @@ export function App() {
         <div className="panel-title">
           <Antenna size={18} />
           <span>Range Calculator</span>
-          <button type="button" title="Resample terrain" onClick={() => layerRef.current?.refreshSources()}>
+          <button
+            type="button"
+            title="Resample terrain"
+            onClick={() => {
+              layerRef.current?.refreshSources();
+              setMapDataRevision((revision) => revision + 1);
+            }}
+          >
             <RefreshCw size={16} />
           </button>
         </div>
