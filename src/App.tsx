@@ -96,6 +96,17 @@ function updateReferenceCircle(map: mapboxgl.Map, analysis: AnalysisRequest): vo
   source?.setData(referenceCircleFeature(analysis.operator, analysis.radiusM));
 }
 
+function operatorFromLngLat(
+  current: AnalysisRequest,
+  lngLat: mapboxgl.LngLat,
+): AnalysisRequest["operator"] {
+  return {
+    ...current.operator,
+    lng: lngLat.lng,
+    lat: lngLat.lat,
+  };
+}
+
 export function App() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
@@ -134,6 +145,7 @@ export function App() {
     });
     map.dragRotate.disable();
     map.touchZoomRotate.disableRotation();
+    map.boxZoom.disable();
     map.setMaxPitch(0);
 
     mapRef.current = map;
@@ -149,13 +161,31 @@ export function App() {
       }));
     });
 
+    const placeOperator = (lngLat: mapboxgl.LngLat) => {
+      markerRef.current?.setLngLat(lngLat);
+      setAnalysis((current) => ({
+        ...current,
+        operator: operatorFromLngLat(current, lngLat),
+      }));
+    };
+    let placedOperatorOnMouseDown = false;
+
+    map.on("mousedown", (event) => {
+      if (event.originalEvent.shiftKey) {
+        event.originalEvent.preventDefault();
+        placedOperatorOnMouseDown = true;
+        placeOperator(event.lngLat);
+      }
+    });
+
     map.on("click", (event) => {
       if (event.originalEvent.shiftKey) {
-        markerRef.current?.setLngLat(event.lngLat);
-        setAnalysis((current) => ({
-          ...current,
-          operator: { ...current.operator, lng: event.lngLat.lng, lat: event.lngLat.lat },
-        }));
+        event.originalEvent.preventDefault();
+        if (placedOperatorOnMouseDown) {
+          placedOperatorOnMouseDown = false;
+          return;
+        }
+        placeOperator(event.lngLat);
         return;
       }
       setInspector(inspectFlatEarthPixel(analysisRef.current, event.lngLat));
