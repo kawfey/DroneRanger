@@ -54,6 +54,8 @@ export type DebugMode =
 
 export type CoveragePixel = {
   requiredAltitudeM: number;
+  requiredElevationChangeM: number;
+  operatorAltitudeAslM: number;
   reachable: boolean;
   combinedMarginDb: number;
   modeMarginDb: number | null;

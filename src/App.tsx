@@ -731,8 +731,10 @@ export function App() {
           <dl>
             <dt>Reachable</dt>
             <dd>{inspector.reachable ? "Yes" : "No"}</dd>
-            <dt>Required altitude</dt>
-            <dd>{inspector.requiredAltitudeM.toFixed(1)} m</dd>
+            <dt>Min. elevation change</dt>
+            <dd>{inspector.requiredElevationChangeM.toFixed(1)} m</dd>
+            <dt>Operator altitude (ASL)</dt>
+            <dd>{inspector.operatorAltitudeAslM.toFixed(1)} m</dd>
             {debugMode !== "combined" && debugMode !== "los" && inspector.modeMarginDb !== null && (
               <>
                 <dt>{modeMarginLabel(debugMode)}</dt>

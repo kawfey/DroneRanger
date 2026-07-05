@@ -37,7 +37,7 @@ describe("coverage renderer planning", () => {
   it("maps grid resolution to texture size with caps", () => {
     expect(coverageTextureSizeFor(2500, 100)).toBe(64);
     expect(coverageTextureSizeFor(2500, 25)).toBe(200);
-    expect(coverageTextureSizeFor(10000, 5)).toBe(224);
+    expect(coverageTextureSizeFor(10000, 5)).toBe(384);
   });
 
   it("uses calculation radius and grid resolution together", () => {

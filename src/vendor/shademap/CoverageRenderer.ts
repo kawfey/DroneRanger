@@ -9,7 +9,7 @@ import {
 import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "../../analysis/rf";
 
 const minTextureSize = 64;
-const maxTextureSize = 224;
+const maxTextureSize = 384;
 const maxRfAnalysisRadiusM = 100000;
 const raySteps = 14;
 const rebuildDelayMs = 120;

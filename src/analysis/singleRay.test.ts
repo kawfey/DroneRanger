@@ -36,4 +36,36 @@ describe("single ray inspector", () => {
     expect(inspected.requiredAltitudeM).toBeGreaterThan(defaultAnalysis.altitude.minM);
     expect(inspected.reachable).toBe(false);
   });
+
+  it("reports signed minimum elevation change relative to operator altitude", () => {
+    const request = {
+      ...defaultAnalysis,
+      operator: {
+        ...defaultAnalysis.operator,
+        antennaHeightM: 2,
+      },
+      altitude: {
+        ...defaultAnalysis.altitude,
+        minM: 0,
+        maxM: 120,
+      },
+    };
+    const target = {
+      lng: request.operator.lng + 0.01,
+      lat: request.operator.lat,
+    };
+    const ridgeNearTargetMap = {
+      queryTerrainElevation: (lngLat: { lng: number }) => {
+        if (lngLat.lng === request.operator.lng) return 98;
+        if (lngLat.lng > request.operator.lng + 0.009) return 50;
+        return 0;
+      },
+    };
+
+    const inspected = inspectTerrainPixel(ridgeNearTargetMap, request, target, "los");
+
+    expect(inspected.operatorAltitudeAslM).toBe(100);
+    expect(inspected.requiredElevationChangeM).toBeLessThan(0);
+    expect(inspected.requiredElevationChangeM).toBeCloseTo(-50, 1);
+  });
 });
