@@ -3,6 +3,7 @@ import {
   lngLatToMercator01,
   mercator01ToLngLat,
 } from "./coordinates";
+import { buildingHeightM } from "./buildings";
 import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "./rf";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile } from "../types";
 
@@ -14,6 +15,12 @@ type TerrainSampler = {
     lngLat: { lng: number; lat: number },
     options?: { exaggerated: boolean },
   ): number | null | undefined;
+  project?(lngLat: { lng: number; lat: number }): { x: number; y: number };
+  getLayer?(id: string): unknown;
+  queryRenderedFeatures?(
+    point: { x: number; y: number },
+    options?: { layers?: string[] },
+  ): Array<{ properties?: Record<string, unknown> | null }>;
 };
 
 function limitingMarginDb(distanceM: number, profiles: LinkProfile[]): number {
@@ -113,7 +120,8 @@ export function inspectTerrainPixel(
       y: operatorMercator.y + (targetMercator.y - operatorMercator.y) * t,
     });
     const sampleTerrain = terrainElevation(map, sampleLngLat);
-    const sampleRequiredTargetAbsM = operatorAbsM + (sampleTerrain - operatorAbsM) / t;
+    const sampleObstacleAbsM = obstacleElevation(map, request, sampleLngLat, sampleTerrain);
+    const sampleRequiredTargetAbsM = operatorAbsM + (sampleObstacleAbsM - operatorAbsM) / t;
     requiredTargetAbsM = Math.max(requiredTargetAbsM, sampleRequiredTargetAbsM);
   }
 
@@ -134,4 +142,33 @@ function terrainElevation(
 ): number {
   const elevation = map.queryTerrainElevation(lngLat, { exaggerated: false });
   return typeof elevation === "number" && Number.isFinite(elevation) ? elevation : 0;
+}
+
+function obstacleElevation(
+  map: TerrainSampler,
+  request: AnalysisRequest,
+  lngLat: { lng: number; lat: number },
+  terrainM: number,
+): number {
+  if (
+    !request.includeBuildings ||
+    !map.project ||
+    !map.getLayer?.("los-building-reference") ||
+    !map.queryRenderedFeatures
+  ) {
+    return terrainM;
+  }
+
+  try {
+    const features = map.queryRenderedFeatures(map.project(lngLat), {
+      layers: ["los-building-reference"],
+    });
+    const buildingM = features.reduce(
+      (height, feature) => Math.max(height, buildingHeightM(feature)),
+      0,
+    );
+    return terrainM + buildingM;
+  } catch {
+    return terrainM;
+  }
 }

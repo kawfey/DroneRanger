@@ -46,7 +46,6 @@ export class MapboxBuildingObstacleSource implements ObstacleSource {
       type: "fill-extrusion",
       source: composite,
       "source-layer": "building",
-      minzoom: 14,
       paint: {
         "fill-extrusion-color": "rgba(0,0,0,0)",
         "fill-extrusion-height": [

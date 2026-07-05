@@ -6,6 +6,7 @@ import {
   mercator01ToLngLat,
   metersToMercatorUnits,
 } from "../../analysis/coordinates";
+import { buildingHeightM } from "../../analysis/buildings";
 import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "../../analysis/rf";
 
 const minTextureSize = 64;
@@ -304,8 +305,9 @@ export class CoverageRenderer {
             continue;
           }
           terrainSamples++;
-          blockerElevationM = Math.max(blockerElevationM, sampleTerrain);
-          const requiredTargetAbsM = operatorAbsM + (sampleTerrain - operatorAbsM) / t;
+          const sampleObstacleAbsM = obstacleElevation(map, request, sampleLngLat, sampleTerrain);
+          blockerElevationM = Math.max(blockerElevationM, sampleObstacleAbsM);
+          const requiredTargetAbsM = operatorAbsM + (sampleObstacleAbsM - operatorAbsM) / t;
           requiredAltitudeM = Math.max(requiredAltitudeM, requiredTargetAbsM - targetTerrain);
         }
 
@@ -344,6 +346,30 @@ export class CoverageRenderer {
 function terrainElevation(map: mapboxgl.Map, lngLat: { lng: number; lat: number }): number {
   const elevation = map.queryTerrainElevation(lngLat, { exaggerated: false });
   return typeof elevation === "number" && Number.isFinite(elevation) ? elevation : 0;
+}
+
+function obstacleElevation(
+  map: mapboxgl.Map,
+  request: AnalysisRequest,
+  lngLat: { lng: number; lat: number },
+  terrainM: number,
+): number {
+  if (!request.includeBuildings || !map.getLayer("los-building-reference")) {
+    return terrainM;
+  }
+
+  try {
+    const features = map.queryRenderedFeatures(map.project(lngLat), {
+      layers: ["los-building-reference"],
+    }) as Array<{ properties?: Record<string, unknown> | null }>;
+    const buildingM = features.reduce(
+      (height, feature) => Math.max(height, buildingHeightM({ properties: feature.properties })),
+      0,
+    );
+    return terrainM + buildingM;
+  } catch {
+    return terrainM;
+  }
 }
 
 export function selectedProfilesForMode(

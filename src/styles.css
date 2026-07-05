@@ -316,6 +316,19 @@ output {
   accent-color: #16896a;
 }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: #16896a;
+}
+
 .inspector {
   left: 16px;
   bottom: 54px;

@@ -41,6 +41,7 @@ export type AnalysisRequest = {
   };
   profiles: LinkProfile[];
   selectedProfileIds: LinkProfileId[];
+  includeBuildings: boolean;
 };
 
 export type DebugMode =

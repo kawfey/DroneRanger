@@ -37,6 +37,40 @@ describe("single ray inspector", () => {
     expect(inspected.reachable).toBe(false);
   });
 
+  it("uses Mapbox building blockers only when enabled", () => {
+    const target = {
+      lng: defaultAnalysis.operator.lng + 0.01,
+      lat: defaultAnalysis.operator.lat,
+    };
+    const buildingMap = {
+      queryTerrainElevation: () => 0,
+      project: (lngLat: { lng: number; lat: number }) => ({ x: lngLat.lng, y: lngLat.lat }),
+      getLayer: (id: string) => (id === "los-building-reference" ? {} : undefined),
+      queryRenderedFeatures: (point: { x: number }) =>
+        point.x > defaultAnalysis.operator.lng + 0.004 &&
+        point.x < defaultAnalysis.operator.lng + 0.006
+          ? [{ properties: { height: 80 } }]
+          : [],
+    };
+
+    const withoutBuildings = inspectTerrainPixel(
+      buildingMap,
+      { ...defaultAnalysis, includeBuildings: false },
+      target,
+      "combined",
+    );
+    const withBuildings = inspectTerrainPixel(
+      buildingMap,
+      { ...defaultAnalysis, includeBuildings: true },
+      target,
+      "combined",
+    );
+
+    expect(withoutBuildings.requiredAltitudeM).toBe(defaultAnalysis.altitude.minM);
+    expect(withBuildings.requiredAltitudeM).toBeGreaterThan(withoutBuildings.requiredAltitudeM);
+    expect(withBuildings.reachable).toBe(false);
+  });
+
   it("reports signed minimum elevation change relative to operator altitude", () => {
     const request = {
       ...defaultAnalysis,

@@ -527,6 +527,23 @@ export function App() {
           </label>
 
           <label>
+            <span className="toggle-row">
+              <span>Building occlusion</span>
+              <input
+                type="checkbox"
+                checked={analysis.includeBuildings}
+                onChange={(event) =>
+                  setAnalysis((current) => ({
+                    ...current,
+                    includeBuildings: event.target.checked,
+                  }))
+                }
+              />
+            </span>
+            <output>Use Mapbox building heights as line-of-sight blockers</output>
+          </label>
+
+          <label>
             Grid resolution
             <input
               type="range"
