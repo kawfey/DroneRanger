@@ -46,7 +46,7 @@ export const defaultAnalysis: AnalysisRequest = {
     antennaHeightM: 2,
   },
   radiusM: 2500,
-  gridResolutionM: 20,
+  gridResolutionM: 75,
   calculationRange: {
     mode: "auto",
     manualM: 5000,

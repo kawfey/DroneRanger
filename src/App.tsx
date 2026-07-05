@@ -8,6 +8,8 @@ import { analysisRadiusM, coverageTextureSizeFor } from "./vendor/shademap/Cover
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile, LinkProfileId } from "./types";
 
 const token = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+const minGridResolutionM = 5;
+const maxGridResolutionM = 500;
 
 const debugModes: Array<{ id: DebugMode; label: string }> = [
   { id: "combined", label: "Combined" },
@@ -38,6 +40,20 @@ function updateProfile(
   patch: Partial<LinkProfile>,
 ): LinkProfile[] {
   return profiles.map((profile) => (profile.id === id ? { ...profile, ...patch } : profile));
+}
+
+function gridResolutionToSlider(valueM: number): number {
+  const min = Math.log(minGridResolutionM);
+  const max = Math.log(maxGridResolutionM);
+  const clamped = Math.max(minGridResolutionM, Math.min(maxGridResolutionM, valueM));
+  return ((Math.log(clamped) - min) / (max - min)) * 100;
+}
+
+function sliderToGridResolution(value: number): number {
+  const min = Math.log(minGridResolutionM);
+  const max = Math.log(maxGridResolutionM);
+  const normalized = Math.max(0, Math.min(100, value)) / 100;
+  return Math.round(Math.exp(min + normalized * (max - min)));
 }
 
 function referenceCircleFeature(
@@ -355,11 +371,13 @@ export function App() {
             Grid resolution
             <input
               type="range"
-              min="5"
+              min="0"
               max="100"
-              step="5"
-              value={analysis.gridResolutionM}
-              onChange={(event) => setNumber("gridResolutionM", Number(event.target.value))}
+              step="1"
+              value={gridResolutionToSlider(analysis.gridResolutionM)}
+              onChange={(event) =>
+                setNumber("gridResolutionM", sliderToGridResolution(Number(event.target.value)))
+              }
             />
             <output>
               {analysis.gridResolutionM} m cells, {effectiveTextureSize} x {effectiveTextureSize}
