@@ -371,7 +371,7 @@ export function App() {
       <aside className="toolbar" aria-label="Analysis controls">
         <div className="panel-title">
           <Antenna size={18} />
-          <span>LOS Range</span>
+          <span>Range Calculator</span>
           <button type="button" title="Resample terrain" onClick={() => layerRef.current?.refreshSources()}>
             <RefreshCw size={16} />
           </button>
@@ -692,7 +692,7 @@ export function App() {
                 </span>
               </label>
               <label>
-                Link Margin
+                Required margin
                 <span className="input-with-unit">
                   <input
                     type="number"
