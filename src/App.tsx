@@ -88,6 +88,14 @@ function sliderToGridResolution(value: number): number {
   return Math.round(Math.exp(min + normalized * (max - min)));
 }
 
+function dbmToMw(dbm: number): number {
+  return 10 ** (dbm / 10);
+}
+
+function mwToDbm(mw: number): number {
+  return 10 * Math.log10(mw);
+}
+
 function referenceCircleFeature(
   operator: AnalysisRequest["operator"],
   radiusM: number,
@@ -550,18 +558,22 @@ export function App() {
                 />
               </label>
               <label>
-                TX dBm
+                TX power (mW)
                 <input
                   type="number"
-                  value={profile.txPowerDbm}
-                  onChange={(event) =>
+                  min="0.001"
+                  step="1"
+                  value={Number(dbmToMw(profile.txPowerDbm).toFixed(2))}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value) || value <= 0) return;
                     setAnalysis((current) => ({
                       ...current,
                       profiles: updateProfile(current.profiles, profile.id, {
-                        txPowerDbm: Number(event.target.value),
+                        txPowerDbm: mwToDbm(value),
                       }),
-                    }))
-                  }
+                    }));
+                  }}
                 />
               </label>
               <label>
