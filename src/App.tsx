@@ -540,12 +540,13 @@ export function App() {
         </details>
       </aside>
 
-      <aside className="profiles" aria-label="RF profiles">
-        <div className="panel-title">
+      <details className="profiles" aria-label="RF profiles" open>
+        <summary className="panel-title">
           <Radio size={18} />
           <span>RF Profiles</span>
           <small>{activeProfiles.length} active</small>
-        </div>
+          <ChevronDown className="disclosure-icon" size={16} />
+        </summary>
         {analysis.profiles.map((profile) => (
           <section className="profile-card" key={profile.id}>
             <label className="check-row">
@@ -598,6 +599,42 @@ export function App() {
                 </span>
               </label>
               <label>
+                TX antenna gain
+                <span className="input-with-unit">
+                  <input
+                    type="number"
+                    value={profile.txGainDbi}
+                    onChange={(event) =>
+                      setAnalysis((current) => ({
+                        ...current,
+                        profiles: updateProfile(current.profiles, profile.id, {
+                          txGainDbi: Number(event.target.value),
+                        }),
+                      }))
+                    }
+                  />
+                  <span>dBi</span>
+                </span>
+              </label>
+              <label>
+                RX antenna gain
+                <span className="input-with-unit">
+                  <input
+                    type="number"
+                    value={profile.rxGainDbi}
+                    onChange={(event) =>
+                      setAnalysis((current) => ({
+                        ...current,
+                        profiles: updateProfile(current.profiles, profile.id, {
+                          rxGainDbi: Number(event.target.value),
+                        }),
+                      }))
+                    }
+                  />
+                  <span>dBi</span>
+                </span>
+              </label>
+              <label>
                 Sensitivity
                 <span className="input-with-unit">
                   <input
@@ -636,7 +673,7 @@ export function App() {
             </div>
           </section>
         ))}
-      </aside>
+      </details>
 
       {inspector && (
         <aside className="inspector">

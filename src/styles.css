@@ -95,6 +95,32 @@ select {
   font-weight: 650;
 }
 
+summary.panel-title {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.panel-title::-webkit-details-marker {
+  display: none;
+}
+
+.profiles summary.panel-title {
+  min-height: 38px;
+  padding: 0 2px;
+}
+
+.profiles summary.panel-title:hover {
+  color: #0b5f49;
+}
+
+.profiles summary.panel-title .disclosure-icon {
+  margin-left: 2px;
+}
+
+.profiles[open] summary.panel-title .disclosure-icon {
+  transform: rotate(180deg);
+}
+
 label {
   display: grid;
   gap: 6px;
