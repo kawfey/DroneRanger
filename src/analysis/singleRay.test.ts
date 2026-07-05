@@ -16,6 +16,9 @@ describe("single ray inspector", () => {
     expect(inspectTerrainPixel(flatMap, defaultAnalysis, target, "combined")).toMatchObject(
       inspectFlatEarthPixel(defaultAnalysis, target, "combined"),
     );
+    expect(inspectTerrainPixel(flatMap, defaultAnalysis, target, "combined").violationCriteria).toBe(
+      "None",
+    );
   });
 
   it("uses terrain blockers to increase required altitude", () => {
@@ -35,6 +38,7 @@ describe("single ray inspector", () => {
 
     expect(inspected.requiredAltitudeM).toBeGreaterThan(defaultAnalysis.altitude.minM);
     expect(inspected.reachable).toBe(false);
+    expect(inspected.violationCriteria).toBe("Max alt, Terrain");
   });
 
   it("uses Mapbox building blockers only when enabled", () => {
@@ -69,6 +73,7 @@ describe("single ray inspector", () => {
     expect(withoutBuildings.requiredAltitudeM).toBe(defaultAnalysis.altitude.minM);
     expect(withBuildings.requiredAltitudeM).toBeGreaterThan(withoutBuildings.requiredAltitudeM);
     expect(withBuildings.reachable).toBe(false);
+    expect(withBuildings.violationCriteria).toBe("Max alt, Building");
   });
 
   it("reports signed minimum elevation change relative to operator altitude", () => {

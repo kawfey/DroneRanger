@@ -57,6 +57,7 @@ export type CoveragePixel = {
   requiredAltitudeM: number;
   requiredElevationChangeM: number;
   operatorAltitudeAslM: number;
+  violationCriteria: string;
   reachable: boolean;
   combinedMarginDb: number;
   modeMarginDb: number | null;

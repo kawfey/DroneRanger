@@ -766,6 +766,8 @@ export function App() {
           <dl>
             <dt>Reachable</dt>
             <dd>{inspector.reachable ? "Yes" : "No"}</dd>
+            <dt>Violation criteria</dt>
+            <dd>{inspector.violationCriteria}</dd>
             <dt>Min. elevation change</dt>
             <dd>{inspector.requiredElevationChangeM.toFixed(1)} m</dd>
             <dt>Operator altitude (ASL)</dt>

@@ -23,6 +23,11 @@ type TerrainSampler = {
   ): Array<{ properties?: Record<string, unknown> | null }>;
 };
 
+type ObstacleSample = {
+  elevationM: number;
+  source: "terrain" | "building";
+};
+
 function limitingMarginDb(distanceM: number, profiles: LinkProfile[]): number {
   const margins = profiles.map((profile) => linkMarginDb(distanceM, profile));
   return margins.length > 0 ? Math.min(...margins) : 0;
@@ -80,7 +85,9 @@ export function inspectFlatEarthPixel(
   const combinedMarginDb = limitingMarginDb(distanceM, combinedProfiles);
   const modeMarginDb = modeProfile ? limitingMarginDb(distanceM, [modeProfile]) : null;
   const activeMarginDb = activeProfiles.length > 0 ? limitingMarginDb(distanceM, activeProfiles) : 0;
-  const reachable = distanceM <= analysisRadiusM(request, debugMode) && activeMarginDb >= 0;
+  const activeRadiusM = analysisRadiusM(request, debugMode);
+  const criteria = baseViolationCriteria(request, distanceM, activeRadiusM, activeMarginDb);
+  const reachable = criteria.size === 0;
   const operatorAbsM = request.operator.antennaHeightM;
   const targetAbsM = request.altitude.minM;
 
@@ -88,6 +95,7 @@ export function inspectFlatEarthPixel(
     requiredAltitudeM: targetAbsM,
     requiredElevationChangeM: targetAbsM - operatorAbsM,
     operatorAltitudeAslM: operatorAbsM,
+    violationCriteria: criteriaLabel(criteria),
     reachable,
     combinedMarginDb,
     modeMarginDb,
@@ -112,6 +120,7 @@ export function inspectTerrainPixel(
   const operatorMercator = lngLatToMercator01(request.operator.lng, request.operator.lat);
   const targetMercator = lngLatToMercator01(target.lng, target.lat);
   let requiredTargetAbsM = targetTerrain + request.altitude.minM;
+  let limitingObstacle: ObstacleSample["source"] = "terrain";
 
   for (let step = 1; step < raySteps; step++) {
     const t = step / raySteps;
@@ -120,19 +129,28 @@ export function inspectTerrainPixel(
       y: operatorMercator.y + (targetMercator.y - operatorMercator.y) * t,
     });
     const sampleTerrain = terrainElevation(map, sampleLngLat);
-    const sampleObstacleAbsM = obstacleElevation(map, request, sampleLngLat, sampleTerrain);
-    const sampleRequiredTargetAbsM = operatorAbsM + (sampleObstacleAbsM - operatorAbsM) / t;
-    requiredTargetAbsM = Math.max(requiredTargetAbsM, sampleRequiredTargetAbsM);
+    const sampleObstacle = obstacleElevation(map, request, sampleLngLat, sampleTerrain);
+    const sampleRequiredTargetAbsM = operatorAbsM + (sampleObstacle.elevationM - operatorAbsM) / t;
+    if (sampleRequiredTargetAbsM > requiredTargetAbsM) {
+      requiredTargetAbsM = sampleRequiredTargetAbsM;
+      limitingObstacle = sampleObstacle.source;
+    }
   }
 
   const requiredAltitudeM = requiredTargetAbsM - targetTerrain;
+  const criteria = criteriaFromLabel(pixel.violationCriteria);
+  if (requiredAltitudeM > request.altitude.maxM) {
+    criteria.add("Max alt");
+    criteria.add(limitingObstacle === "building" ? "Building" : "Terrain");
+  }
 
   return {
     ...pixel,
     requiredAltitudeM,
     requiredElevationChangeM: requiredTargetAbsM - operatorAbsM,
     operatorAltitudeAslM: operatorAbsM,
-    reachable: pixel.reachable && requiredAltitudeM <= request.altitude.maxM,
+    violationCriteria: criteriaLabel(criteria),
+    reachable: criteria.size === 0,
   };
 }
 
@@ -149,14 +167,14 @@ function obstacleElevation(
   request: AnalysisRequest,
   lngLat: { lng: number; lat: number },
   terrainM: number,
-): number {
+): ObstacleSample {
   if (
     !request.includeBuildings ||
     !map.project ||
     !map.getLayer?.("los-building-reference") ||
     !map.queryRenderedFeatures
   ) {
-    return terrainM;
+    return { elevationM: terrainM, source: "terrain" };
   }
 
   try {
@@ -167,8 +185,39 @@ function obstacleElevation(
       (height, feature) => Math.max(height, buildingHeightM(feature)),
       0,
     );
-    return terrainM + buildingM;
+    return {
+      elevationM: terrainM + buildingM,
+      source: buildingM > 0 ? "building" : "terrain",
+    };
   } catch {
-    return terrainM;
+    return { elevationM: terrainM, source: "terrain" };
   }
+}
+
+function baseViolationCriteria(
+  request: AnalysisRequest,
+  distanceM: number,
+  activeRadiusM: number,
+  activeMarginDb: number,
+): Set<string> {
+  const criteria = new Set<string>();
+  if (request.altitude.minM > request.altitude.maxM) {
+    criteria.add("Min alt");
+    criteria.add("Max alt");
+  }
+  if (distanceM > activeRadiusM) {
+    criteria.add("Range");
+  }
+  if (activeMarginDb < 0) {
+    criteria.add("RF");
+  }
+  return criteria;
+}
+
+function criteriaFromLabel(label: string): Set<string> {
+  return new Set(label === "None" ? [] : label.split(", "));
+}
+
+function criteriaLabel(criteria: Set<string>): string {
+  return criteria.size > 0 ? [...criteria].join(", ") : "None";
 }
