@@ -9,9 +9,10 @@ import {
 import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "../../analysis/rf";
 
 const minTextureSize = 64;
-const maxTextureSize = 384;
+const maxTextureSize = 224;
 const maxRfAnalysisRadiusM = 100000;
-const raySteps = 28;
+const raySteps = 14;
+const rebuildDelayMs = 120;
 
 const vertexSource = `
 precision highp float;
@@ -130,6 +131,7 @@ export class CoverageRenderer {
   private attribMercator: number;
   private attribUv: number;
   private dirty = true;
+  private rebuildAfter = 0;
   private lastTerrainSamples = 0;
 
   constructor(private readonly gl: WebGLRenderingContext) {
@@ -152,6 +154,7 @@ export class CoverageRenderer {
 
   markDirty(): void {
     this.dirty = true;
+    this.rebuildAfter = performance.now() + rebuildDelayMs;
   }
 
   render(map: mapboxgl.Map, request: AnalysisRequest, debugMode: DebugMode, matrix: number[]): void {
@@ -161,7 +164,7 @@ export class CoverageRenderer {
     const radiusMercator = metersToMercatorUnits(context.radiusM, request.operator.lat);
     context.radiusMercator = radiusMercator;
 
-    if (this.dirty) {
+    if (this.dirty && (this.textureSize === 0 || performance.now() >= this.rebuildAfter)) {
       const build = this.buildCoverage(map, request, debugMode, operator, context);
       this.lastTerrainSamples = build.terrainSamples;
       gl.bindTexture(gl.TEXTURE_2D, this.texture);

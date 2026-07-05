@@ -173,11 +173,7 @@ export function App() {
       layerRef.current = layer;
       map.addLayer(layer, "reference-radius-line");
       map.on("moveend", () => layer.refreshSources());
-      map.on("sourcedata", () => {
-        if (map.isSourceLoaded("mapbox-dem")) {
-          layer.refreshSources();
-        }
-      });
+      map.once("idle", () => layer.refreshSources());
     });
 
     return () => {
@@ -194,14 +190,7 @@ export function App() {
     if (mapRef.current?.isStyleLoaded()) {
       updateReferenceCircle(mapRef.current, analysis);
     }
-    layerRef.current?.setOperator(analysis.operator);
-    layerRef.current?.setProfiles(analysis.profiles, analysis.selectedProfileIds);
-    layerRef.current?.setAnalysisArea({
-      radiusM: analysis.radiusM,
-      gridResolutionM: analysis.gridResolutionM,
-      calculationRange: analysis.calculationRange,
-      altitude: analysis.altitude,
-    });
+    layerRef.current?.setRequest(analysis);
   }, [analysis]);
 
   useEffect(() => {

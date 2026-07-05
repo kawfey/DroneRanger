@@ -16,6 +16,7 @@ export class LosCoverageLayer implements mapboxgl.CustomLayerInterface {
 
   private map: mapboxgl.Map | null = null;
   private renderer: CoverageRenderer | null = null;
+  private repaintTimer: number | null = null;
   private terrain: TerrainSource = new MapboxTerrainSource();
   private obstacles: ObstacleSource[] = [
     new MapboxBuildingObstacleSource(),
@@ -39,46 +40,61 @@ export class LosCoverageLayer implements mapboxgl.CustomLayerInterface {
     this.renderer?.render(this.map, this.request, this.debugMode, matrix);
   }
 
+  setRequest(request: AnalysisRequest): void {
+    this.request = request;
+    this.invalidate();
+  }
+
   setOperator(operator: AnalysisRequest["operator"]): void {
     this.request = { ...this.request, operator };
-    this.renderer?.markDirty();
-    this.map?.triggerRepaint();
+    this.invalidate();
   }
 
   setProfiles(profiles: LinkProfile[], selectedProfileIds = this.request.selectedProfileIds): void {
     this.request = { ...this.request, profiles, selectedProfileIds };
-    this.renderer?.markDirty();
-    this.map?.triggerRepaint();
+    this.invalidate();
   }
 
   setAnalysisArea(
     area: Pick<AnalysisRequest, "radiusM" | "gridResolutionM" | "calculationRange" | "altitude">,
   ): void {
     this.request = { ...this.request, ...area };
-    this.renderer?.markDirty();
-    this.map?.triggerRepaint();
+    this.invalidate();
   }
 
   setDebugMode(debugMode: DebugMode): void {
     this.debugMode = debugMode;
-    this.renderer?.markDirty();
-    this.map?.triggerRepaint();
+    this.invalidate();
   }
 
   refreshSources(): void {
     if (!this.map) return;
     this.terrain.refresh(this.map);
     this.obstacles.forEach((source) => source.refresh(this.map!));
-    this.renderer?.markDirty();
-    this.map.triggerRepaint();
+    this.invalidate();
   }
 
   onRemove(): void {
     this.renderer?.dispose();
+    if (this.repaintTimer !== null) {
+      window.clearTimeout(this.repaintTimer);
+    }
     this.terrain.dispose();
     this.obstacles.forEach((source) => source.dispose());
     this.renderer = null;
     this.map = null;
+  }
+
+  private invalidate(): void {
+    this.renderer?.markDirty();
+    this.map?.triggerRepaint();
+    if (this.repaintTimer !== null) {
+      window.clearTimeout(this.repaintTimer);
+    }
+    this.repaintTimer = window.setTimeout(() => {
+      this.repaintTimer = null;
+      this.map?.triggerRepaint();
+    }, 140);
   }
 
   remove(): void {
