@@ -144,8 +144,8 @@ export class CoverageRenderer {
     };
 
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
@@ -363,6 +363,9 @@ export function analysisRadiusM(request: AnalysisRequest, debugMode: DebugMode):
   if (debugMode === "los" || debugMode === "blocker" || debugMode === "shademap") {
     return request.radiusM;
   }
+  if (request.calculationRange.mode === "manual") {
+    return Math.max(250, Math.min(maxRfAnalysisRadiusM, request.calculationRange.manualM));
+  }
   const profiles = selectedProfilesForMode(request, debugMode);
   const rfRange =
     debugMode === "combined" || debugMode === "margin"
@@ -388,5 +391,6 @@ function renderContext(request: AnalysisRequest, debugMode: DebugMode): RenderCo
 }
 
 export { maxRfAnalysisRadiusM };
+export { renderContext };
 export const terrainRaySteps = raySteps;
 export { profileBudget };

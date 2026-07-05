@@ -47,6 +47,10 @@ export const defaultAnalysis: AnalysisRequest = {
   },
   radiusM: 2500,
   gridResolutionM: 20,
+  calculationRange: {
+    mode: "auto",
+    manualM: 5000,
+  },
   altitude: {
     minM: 0,
     maxM: 120,

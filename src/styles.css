@@ -143,6 +143,10 @@ output {
   margin-top: 14px;
 }
 
+.segmented.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .segmented button {
   min-height: 34px;
   border: 1px solid rgba(23, 32, 42, 0.16);
@@ -166,6 +170,32 @@ output {
   border: 1px solid rgba(23, 32, 42, 0.12);
   border-radius: 8px;
   background: #ffffff;
+}
+
+.config-menu {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(23, 32, 42, 0.12);
+}
+
+.config-menu summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  color: #17202a;
+  cursor: pointer;
+  font-weight: 760;
+  list-style: none;
+}
+
+.config-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.config-menu input:disabled {
+  color: #83909b;
+  background: #eef2f3;
 }
 
 .check-row {

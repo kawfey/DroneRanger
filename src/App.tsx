@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
-import { Activity, Antenna, Layers, MapPin, Radio, RefreshCw } from "lucide-react";
+import { Activity, Antenna, Layers, MapPin, Radio, RefreshCw, Settings } from "lucide-react";
 import { defaultAnalysis } from "./analysis/defaults";
 import { inspectFlatEarthPixel } from "./analysis/singleRay";
 import { LosCoverageLayer } from "./vendor/shademap";
+import { analysisRadiusM, coverageTextureSizeFor } from "./vendor/shademap/CoverageRenderer";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile, LinkProfileId } from "./types";
 
 const token = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
@@ -18,6 +19,15 @@ const debugModes: Array<{ id: DebugMode; label: string }> = [
   { id: "shademap", label: "ShadeMap" },
 ];
 
+type ReferenceCircleFeature = {
+  type: "Feature";
+  properties: Record<string, never>;
+  geometry: {
+    type: "Polygon";
+    coordinates: number[][][];
+  };
+};
+
 function profileLabel(id: LinkProfileId): string {
   return id[0].toUpperCase() + id.slice(1);
 }
@@ -28,6 +38,46 @@ function updateProfile(
   patch: Partial<LinkProfile>,
 ): LinkProfile[] {
   return profiles.map((profile) => (profile.id === id ? { ...profile, ...patch } : profile));
+}
+
+function referenceCircleFeature(
+  operator: AnalysisRequest["operator"],
+  radiusM: number,
+): ReferenceCircleFeature {
+  const coordinates: number[][] = [];
+  const earthRadiusM = 6371008.8;
+  const lat1 = (operator.lat * Math.PI) / 180;
+  const lng1 = (operator.lng * Math.PI) / 180;
+  const angularDistance = radiusM / earthRadiusM;
+
+  for (let i = 0; i <= 160; i++) {
+    const bearing = (i / 160) * Math.PI * 2;
+    const lat2 = Math.asin(
+      Math.sin(lat1) * Math.cos(angularDistance) +
+        Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearing),
+    );
+    const lng2 =
+      lng1 +
+      Math.atan2(
+        Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(lat1),
+        Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2),
+      );
+    coordinates.push([((lng2 * 180) / Math.PI + 540) % 360 - 180, (lat2 * 180) / Math.PI]);
+  }
+
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: {
+      type: "Polygon",
+      coordinates: [coordinates],
+    },
+  };
+}
+
+function updateReferenceCircle(map: mapboxgl.Map, analysis: AnalysisRequest): void {
+  const source = map.getSource("reference-radius") as mapboxgl.GeoJSONSource | undefined;
+  source?.setData(referenceCircleFeature(analysis.operator, analysis.radiusM));
 }
 
 export function App() {
@@ -44,6 +94,14 @@ export function App() {
   const activeProfiles = useMemo(
     () => analysis.profiles.filter((profile) => analysis.selectedProfileIds.includes(profile.id)),
     [analysis.profiles, analysis.selectedProfileIds],
+  );
+  const effectiveCalculationRadiusM = useMemo(
+    () => analysisRadiusM(analysis, debugMode),
+    [analysis, debugMode],
+  );
+  const effectiveTextureSize = useMemo(
+    () => coverageTextureSizeFor(effectiveCalculationRadiusM, analysis.gridResolutionM),
+    [analysis.gridResolutionM, effectiveCalculationRadiusM],
   );
 
   useEffect(() => {
@@ -88,9 +146,32 @@ export function App() {
     });
 
     map.on("load", () => {
+      map.addSource("reference-radius", {
+        type: "geojson",
+        data: referenceCircleFeature(analysis.operator, analysis.radiusM),
+      });
+      map.addLayer({
+        id: "reference-radius-fill",
+        type: "fill",
+        source: "reference-radius",
+        paint: {
+          "fill-color": "#1f8fff",
+          "fill-opacity": 0.04,
+        },
+      });
+      map.addLayer({
+        id: "reference-radius-line",
+        type: "line",
+        source: "reference-radius",
+        paint: {
+          "line-color": "#1f8fff",
+          "line-width": 2,
+          "line-opacity": 0.9,
+        },
+      });
       const layer = new LosCoverageLayer(analysis, debugMode);
       layerRef.current = layer;
-      map.addLayer(layer);
+      map.addLayer(layer, "reference-radius-line");
       map.on("moveend", () => layer.refreshSources());
       map.on("sourcedata", () => {
         if (map.isSourceLoaded("mapbox-dem")) {
@@ -110,11 +191,15 @@ export function App() {
   useEffect(() => {
     analysisRef.current = analysis;
     markerRef.current?.setLngLat([analysis.operator.lng, analysis.operator.lat]);
+    if (mapRef.current?.isStyleLoaded()) {
+      updateReferenceCircle(mapRef.current, analysis);
+    }
     layerRef.current?.setOperator(analysis.operator);
     layerRef.current?.setProfiles(analysis.profiles, analysis.selectedProfileIds);
     layerRef.current?.setAnalysisArea({
       radiusM: analysis.radiusM,
       gridResolutionM: analysis.gridResolutionM,
+      calculationRange: analysis.calculationRange,
       altitude: analysis.altitude,
     });
   }, [analysis]);
@@ -164,7 +249,7 @@ export function App() {
         </div>
 
         <label>
-          LOS radius
+          Reference radius
           <input
             type="range"
             min="250"
@@ -219,18 +304,79 @@ export function App() {
           </label>
         </div>
 
-        <label>
-          Grid resolution
-          <input
-            type="range"
-            min="5"
-            max="100"
-            step="5"
-            value={analysis.gridResolutionM}
-            onChange={(event) => setNumber("gridResolutionM", Number(event.target.value))}
-          />
-          <output>{analysis.gridResolutionM} m</output>
-        </label>
+        <details className="config-menu" open>
+          <summary>
+            <Settings size={16} />
+            <span>Calculation</span>
+          </summary>
+
+          <div className="segmented two" role="radiogroup" aria-label="Calculation range">
+            <button
+              type="button"
+              className={analysis.calculationRange.mode === "auto" ? "active" : ""}
+              onClick={() =>
+                setAnalysis((current) => ({
+                  ...current,
+                  calculationRange: { ...current.calculationRange, mode: "auto" },
+                }))
+              }
+            >
+              Auto
+            </button>
+            <button
+              type="button"
+              className={analysis.calculationRange.mode === "manual" ? "active" : ""}
+              onClick={() =>
+                setAnalysis((current) => ({
+                  ...current,
+                  calculationRange: { ...current.calculationRange, mode: "manual" },
+                }))
+              }
+            >
+              Manual
+            </button>
+          </div>
+
+          <label>
+            Calculation range
+            <input
+              type="number"
+              min="250"
+              step="250"
+              value={analysis.calculationRange.manualM}
+              disabled={analysis.calculationRange.mode === "auto"}
+              onChange={(event) =>
+                setAnalysis((current) => ({
+                  ...current,
+                  calculationRange: {
+                    mode: current.calculationRange.mode,
+                    manualM: Number(event.target.value),
+                  },
+                }))
+              }
+            />
+            <output>
+              {analysis.calculationRange.mode === "auto"
+                ? `${Math.round(effectiveCalculationRadiusM).toLocaleString()} m auto`
+                : `${Math.round(effectiveCalculationRadiusM).toLocaleString()} m manual`}
+            </output>
+          </label>
+
+          <label>
+            Grid resolution
+            <input
+              type="range"
+              min="5"
+              max="100"
+              step="5"
+              value={analysis.gridResolutionM}
+              onChange={(event) => setNumber("gridResolutionM", Number(event.target.value))}
+            />
+            <output>
+              {analysis.gridResolutionM} m cells, {effectiveTextureSize} x {effectiveTextureSize}
+            </output>
+          </label>
+        </details>
 
         <div className="segmented" role="tablist" aria-label="Coverage mode">
           {debugModes.map((mode) => (

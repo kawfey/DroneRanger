@@ -15,6 +15,16 @@ export type LinkProfile = {
   requiredMarginDb: number;
 };
 
+export type CalculationRange =
+  | {
+      mode: "auto";
+      manualM: number;
+    }
+  | {
+      mode: "manual";
+      manualM: number;
+    };
+
 export type AnalysisRequest = {
   operator: {
     lng: number;
@@ -23,6 +33,7 @@ export type AnalysisRequest = {
   };
   radiusM: number;
   gridResolutionM: number;
+  calculationRange: CalculationRange;
   altitude: {
     minM: number;
     maxM: number;

@@ -51,7 +51,9 @@ export class LosCoverageLayer implements mapboxgl.CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
-  setAnalysisArea(area: Pick<AnalysisRequest, "radiusM" | "gridResolutionM" | "altitude">): void {
+  setAnalysisArea(
+    area: Pick<AnalysisRequest, "radiusM" | "gridResolutionM" | "calculationRange" | "altitude">,
+  ): void {
     this.request = { ...this.request, ...area };
     this.renderer?.markDirty();
     this.map?.triggerRepaint();
