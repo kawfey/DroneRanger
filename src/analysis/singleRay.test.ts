@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { defaultAnalysis } from "./defaults";
 import { inspectFlatEarthPixel, inspectTerrainPixel } from "./singleRay";
 
@@ -91,6 +91,36 @@ describe("single ray inspector", () => {
     expect(withBuildings.requiredAltitudeM).toBeGreaterThan(withoutBuildings.requiredAltitudeM);
     expect(withBuildings.reachable).toBe(false);
     expect(withBuildings.violationCriteria).toBe("Building");
+  });
+
+  it("prefers fixed building height samples over rendered feature queries", () => {
+    const target = {
+      lng: defaultAnalysis.operator.lng + 0.01,
+      lat: defaultAnalysis.operator.lat,
+    };
+    const queryRenderedFeatures = vi.fn(() => []);
+    const fixedBuildingMap = {
+      queryTerrainElevation: () => 0,
+      queryBuildingHeightM: (lngLat: { lng: number }) =>
+        lngLat.lng > defaultAnalysis.operator.lng + 0.004 &&
+        lngLat.lng < defaultAnalysis.operator.lng + 0.006
+          ? 80
+          : 0,
+      project: (lngLat: { lng: number; lat: number }) => ({ x: lngLat.lng, y: lngLat.lat }),
+      getLayer: (id: string) => (id === "los-building-reference" ? {} : undefined),
+      queryRenderedFeatures,
+    };
+
+    const inspected = inspectTerrainPixel(
+      fixedBuildingMap,
+      { ...defaultAnalysis, includeBuildings: true },
+      target,
+      "combined",
+    );
+
+    expect(queryRenderedFeatures).not.toHaveBeenCalled();
+    expect(inspected.requiredAltitudeM).toBeGreaterThan(defaultAnalysis.altitude.minM);
+    expect(inspected.violationCriteria).toBe("Building");
   });
 
   it("distinguishes manual range cutoffs from RF-derived auto limits", () => {

@@ -27,6 +27,12 @@ import {
   maxCoverageGridPx,
   minCoverageGridPx,
 } from "./analysis/coverageGrid";
+import { analysisMercatorBounds } from "./analysis/demTiles";
+import {
+  BuildingHeightTileLoader,
+  sampleBuildingHeightField,
+  type BuildingHeightField,
+} from "./analysis/buildingTiles";
 import { shadeForPixel } from "./analysis/coverageShading";
 import {
   lngLatToMercator01,
@@ -94,6 +100,11 @@ const gpuHeightTexturePx = 768;
 const coverageDisplayScale = 4;
 const map3dPitch = 55;
 let coverageSourceCanvas: HTMLCanvasElement | null = null;
+
+type CachedBuildingField = {
+  signature: string;
+  field: BuildingHeightField;
+};
 
 function profileLabel(id: LinkProfileId): string {
   return id[0].toUpperCase() + id.slice(1);
@@ -395,7 +406,13 @@ function updateCoverageLayer(
   debugMode: DebugMode,
   displayCanvas: HTMLCanvasElement,
 ): void {
-  ensureCoverageCanvasSource(map, renderCoverageImage(map, analysis, debugMode, displayCanvas));
+  ensureCoverageCanvasSource(map, renderCoverageImage(mapTerrainSampler(map), analysis, debugMode, displayCanvas));
+}
+
+function mapTerrainSampler(map: mapboxgl.Map): TerrainSampler {
+  return {
+    queryTerrainElevation: (lngLat, options) => map.queryTerrainElevation(lngLat, options),
+  };
 }
 
 function stylePreviewUrl(style: MapStyleTemplate): string {
@@ -495,6 +512,8 @@ export function App() {
   const coverageDisplayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const coverageRenderSeqRef = useRef(0);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
+  const buildingTileLoaderRef = useRef<BuildingHeightTileLoader | null>(null);
+  const buildingFieldRef = useRef<CachedBuildingField | null>(null);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
   const previousStyleUriRef = useRef(defaultMapStyle.uri);
   const refreshCoverageRef = useRef<(map: mapboxgl.Map, analysis: AnalysisRequest) => void>(() => undefined);
@@ -647,6 +666,60 @@ export function App() {
     });
   }
 
+  function buildingFieldSignature(request: AnalysisRequest, mode: DebugMode): string {
+    const radiusM = analysisRadiusM(request, mode);
+    const bounds = analysisMercatorBounds(request, radiusM);
+    return [
+      clampGridSize(request.gridSizePx),
+      bounds.west.toFixed(8),
+      bounds.north.toFixed(8),
+      bounds.east.toFixed(8),
+      bounds.south.toFixed(8),
+    ].join(":");
+  }
+
+  function fixedBuildingSampler(map: mapboxgl.Map, field: BuildingHeightField): TerrainSampler {
+    return {
+      queryTerrainElevation: (lngLat, options) => map.queryTerrainElevation(lngLat, options),
+      queryBuildingHeightM: (lngLat) => sampleBuildingHeightField(field, lngLatToMercator01(lngLat.lng, lngLat.lat)),
+    };
+  }
+
+  async function terrainSamplerForAnalysis(
+    map: mapboxgl.Map,
+    request: AnalysisRequest,
+    mode: DebugMode,
+  ): Promise<TerrainSampler> {
+    if (!request.includeBuildings || !token) {
+      buildingFieldRef.current = null;
+      return mapTerrainSampler(map);
+    }
+    if (!buildingTileLoaderRef.current) {
+      buildingTileLoaderRef.current = new BuildingHeightTileLoader(token);
+    }
+    const signature = buildingFieldSignature(request, mode);
+    if (buildingFieldRef.current?.signature !== signature) {
+      const radiusM = analysisRadiusM(request, mode);
+      const bounds = analysisMercatorBounds(request, radiusM);
+      const gridSize = clampGridSize(request.gridSizePx);
+      buildingFieldRef.current = {
+        signature,
+        field: await buildingTileLoaderRef.current.buildHeightField(bounds, gridSize, gridSize),
+      };
+    }
+    return fixedBuildingSampler(map, buildingFieldRef.current.field);
+  }
+
+  function currentTerrainSampler(map: mapboxgl.Map, request: AnalysisRequest, mode: DebugMode): TerrainSampler {
+    if (!request.includeBuildings) {
+      return mapTerrainSampler(map);
+    }
+    const signature = buildingFieldSignature(request, mode);
+    return buildingFieldRef.current?.signature === signature
+      ? fixedBuildingSampler(map, buildingFieldRef.current.field)
+      : mapTerrainSampler(map);
+  }
+
   const coverageEngineLabel =
     coverageEngine === "gpu"
       ? "GPU terrain"
@@ -696,8 +769,13 @@ export function App() {
     if (sequence !== coverageRenderSeqRef.current) {
       return;
     }
-    const cpuOverlay = renderCoverageImage(map, nextAnalysis, nextDebugMode, document.createElement("canvas"));
+    const sampler = await terrainSamplerForAnalysis(map, nextAnalysis, nextDebugMode);
+    if (sequence !== coverageRenderSeqRef.current) {
+      return;
+    }
+    const cpuOverlay = renderCoverageImage(sampler, nextAnalysis, nextDebugMode, document.createElement("canvas"));
     applyCoverageOverlay(map, cpuOverlay);
+    setMapDataRevision((revision) => revision + 1);
     updateDebugState({
       coverageCoordinates: coverageImageCoordinates(nextAnalysis.operator, analysisRadiusM(nextAnalysis, nextDebugMode)),
       coverageCanvasFingerprint: canvasFingerprint(getCoverageDisplayCanvas()),
@@ -890,7 +968,7 @@ export function App() {
     }
     setInspector(
       map
-        ? inspectTerrainPixel(map, analysis, inspectorTarget, debugMode)
+        ? inspectTerrainPixel(currentTerrainSampler(map, analysis, debugMode), analysis, inspectorTarget, debugMode)
         : inspectFlatEarthPixel(analysis, inspectorTarget, debugMode),
     );
   }, [analysis, debugMode, inspectorTarget, mapDataRevision]);

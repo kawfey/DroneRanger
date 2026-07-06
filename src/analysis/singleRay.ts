@@ -19,6 +19,7 @@ export type TerrainSampler = {
     lngLat: { lng: number; lat: number },
     options?: { exaggerated: boolean },
   ): number | null | undefined;
+  queryBuildingHeightM?(lngLat: { lng: number; lat: number }): number;
   project?(lngLat: { lng: number; lat: number }): { x: number; y: number };
   getLayer?(id: string): unknown;
   queryRenderedFeatures?(
@@ -244,6 +245,14 @@ function obstacleElevation(
   lngLat: { lng: number; lat: number },
   terrainM: number,
 ): ObstacleSample {
+  if (request.includeBuildings && map.queryBuildingHeightM) {
+    const buildingM = map.queryBuildingHeightM(lngLat);
+    return {
+      elevationM: terrainM + buildingM,
+      source: buildingM > 0 ? "building" : "terrain",
+    };
+  }
+
   if (
     !request.includeBuildings ||
     !map.project ||
