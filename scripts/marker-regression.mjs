@@ -199,20 +199,6 @@ function assertSameFootprintAudit(cpu, gpu, expectedReferenceRadiusM) {
   assertSameScreenBounds(cpu.projectedAlphaBounds, gpu.projectedAlphaBounds, "projectedAlphaBounds", cpu, gpu);
 }
 
-function assertSameRenderedFootprint(cpu, gpu) {
-  const message = `CPU rendered footprint:\n${JSON.stringify(cpu, null, 2)}\nGPU rendered footprint:\n${JSON.stringify(gpu, null, 2)}`;
-  assert(cpu.changedPixels > 500, `CPU rendered coverage footprint was not detected\n${message}`);
-  assert(gpu.changedPixels > 500, `GPU rendered coverage footprint was not detected\n${message}`);
-  assert(Boolean(cpu.bounds) && Boolean(gpu.bounds), `rendered footprint bounds missing\n${message}`);
-
-  const areaRatio = gpu.changedPixels / cpu.changedPixels;
-  assert(areaRatio > 0.94 && areaRatio < 1.06, `rendered coverage area ratio mismatch: ${areaRatio.toFixed(4)}\n${message}`);
-  assert(Math.abs(cpu.radiusX - gpu.radiusX) <= 2, `rendered coverage radiusX mismatch\n${message}`);
-  assert(Math.abs(cpu.radiusY - gpu.radiusY) <= 2, `rendered coverage radiusY mismatch\n${message}`);
-  assert(Math.abs(cpu.center.x - gpu.center.x) <= 2, `rendered coverage center.x mismatch\n${message}`);
-  assert(Math.abs(cpu.center.y - gpu.center.y) <= 2, `rendered coverage center.y mismatch\n${message}`);
-}
-
 function assertSameInspections(cpu, gpu) {
   assert(cpu.length === gpu.length, "CPU/GPU inspection sample counts should match");
   for (let index = 0; index < cpu.length; index++) {
