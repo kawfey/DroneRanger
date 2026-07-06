@@ -189,6 +189,18 @@ function updateReferenceCircle(map: mapboxgl.Map, analysis: AnalysisRequest): vo
   source?.setData(referenceCircleFeature(analysis.operator, analysis.radiusM));
 }
 
+function coverageFootprintKey(analysis: AnalysisRequest, debugMode: DebugMode): string {
+  const radiusM = analysisRadiusM(analysis, debugMode);
+  const bounds = analysisMercatorBounds(analysis, radiusM);
+  return [
+    debugMode,
+    bounds.west.toFixed(8),
+    bounds.north.toFixed(8),
+    bounds.east.toFixed(8),
+    bounds.south.toFixed(8),
+  ].join(":");
+}
+
 export function hideStaleCoverage(map: mapboxgl.Map): void {
   if (map.getLayer("los-coverage")) {
     map.setPaintProperty("los-coverage", "raster-opacity", 0);
@@ -549,6 +561,7 @@ export function App() {
   const hasToken = Boolean(token && token !== "your_mapbox_token_here");
   const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? defaultMapStyle;
   const latestAnalysisRef = useRef(analysis);
+  const latestCoverageFootprintRef = useRef(coverageFootprintKey(analysis, debugMode));
 
   function updateDebugState(patch: Partial<DroneRangeDebugState> = {}) {
     if (!import.meta.env.DEV) return;
@@ -1003,8 +1016,12 @@ export function App() {
     if (shouldSkipCoverageRefresh) {
       skipNextCoverageEffectRef.current = null;
     } else if (mapRef.current?.isStyleLoaded()) {
+      const nextCoverageFootprint = coverageFootprintKey(analysis, debugMode);
       updateReferenceCircle(mapRef.current, analysis);
-      hideStaleCoverage(mapRef.current);
+      if (nextCoverageFootprint !== latestCoverageFootprintRef.current) {
+        hideStaleCoverage(mapRef.current);
+      }
+      latestCoverageFootprintRef.current = nextCoverageFootprint;
       void refreshCoverageLayer(mapRef.current, analysis, debugMode);
     }
     updateDebugState({
