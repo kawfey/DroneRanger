@@ -11,10 +11,11 @@ import {
   coverageRaySteps,
   createCoverageGridSpec,
   gridCellMercator,
-  sampleHeightField,
+  sampleObstacleHeightField,
   solveHeightFieldGrid,
   type HeightField,
 } from "./analysis/coverageGrid";
+import { BuildingHeightTileLoader } from "./analysis/buildingTiles";
 import { plotCoverageGridData } from "./analysis/coveragePlot";
 import { analysisRadiusM } from "./analysis/singleRay";
 import { combinedMaxFreeSpaceRangeM, maxFreeSpaceRangeM } from "./analysis/rf";
@@ -66,7 +67,7 @@ uniform int u_raySteps;
 in vec2 v_uv;
 out vec4 outData;
 
-float heightAt(vec2 uv) {
+vec2 heightPairAt(vec2 uv) {
   vec2 clampedUv = clamp(uv, vec2(0.0), vec2(1.0));
   vec2 pixel = clampedUv * u_heightTexturePx - 0.5;
   vec2 base = floor(pixel);
@@ -78,11 +79,19 @@ float heightAt(vec2 uv) {
   vec2 uv10 = (vec2(p11.x, p00.y) + 0.5) / u_heightTexturePx;
   vec2 uv01 = (vec2(p00.x, p11.y) + 0.5) / u_heightTexturePx;
   vec2 uv11 = (p11 + 0.5) / u_heightTexturePx;
-  float h00 = texture(u_height, uv00).r;
-  float h10 = texture(u_height, uv10).r;
-  float h01 = texture(u_height, uv01).r;
-  float h11 = texture(u_height, uv11).r;
-    return mix(mix(h00, h10, fracPart.x), mix(h01, h11, fracPart.x), fracPart.y);
+  vec2 h00 = texture(u_height, uv00).rg;
+  vec2 h10 = texture(u_height, uv10).rg;
+  vec2 h01 = texture(u_height, uv01).rg;
+  vec2 h11 = texture(u_height, uv11).rg;
+  return mix(mix(h00, h10, fracPart.x), mix(h01, h11, fracPart.x), fracPart.y);
+}
+
+float terrainAt(vec2 uv) {
+  return heightPairAt(uv).r;
+}
+
+float obstacleAt(vec2 uv) {
+  return heightPairAt(uv).g;
 }
 
 vec4 solveCoverage(vec2 terrainUv) {
@@ -97,8 +106,8 @@ vec4 solveCoverage(vec2 terrainUv) {
     return vec4(u_maxAltitudeM + 1.0, 0.0, rangePass, distanceM);
   }
 
-  float operatorAbsM = heightAt(u_operatorUv) + u_antennaHeightM;
-  float targetTerrainM = heightAt(terrainUv);
+  float operatorAbsM = terrainAt(u_operatorUv) + u_antennaHeightM;
+  float targetTerrainM = terrainAt(terrainUv);
   float minAltitudeM = u_altitudeCriterion == 1 ? max(0.0, u_minAltitudeM) : u_minAltitudeM;
   float requiredTargetAbsM = u_altitudeCriterion == 1
     ? targetTerrainM + minAltitudeM
@@ -110,7 +119,7 @@ vec4 solveCoverage(vec2 terrainUv) {
     }
     float t = float(step) / float(u_raySteps);
     vec2 sampleUv = mix(u_operatorUv, terrainUv, t);
-    float obstacleM = heightAt(sampleUv);
+    float obstacleM = obstacleAt(sampleUv);
     requiredTargetAbsM = max(requiredTargetAbsM, operatorAbsM + (obstacleM - operatorAbsM) / max(t, 0.001));
   }
 
@@ -145,7 +154,7 @@ uniform int u_debugMode;
 in vec2 v_uv;
 out vec4 outColor;
 
-float heightAt(vec2 uv) {
+vec2 heightPairAt(vec2 uv) {
   vec2 clampedUv = clamp(uv, vec2(0.0), vec2(1.0));
   vec2 pixel = clampedUv * u_heightTexturePx - 0.5;
   vec2 base = floor(pixel);
@@ -157,11 +166,19 @@ float heightAt(vec2 uv) {
   vec2 uv10 = (vec2(p11.x, p00.y) + 0.5) / u_heightTexturePx;
   vec2 uv01 = (vec2(p00.x, p11.y) + 0.5) / u_heightTexturePx;
   vec2 uv11 = (p11 + 0.5) / u_heightTexturePx;
-  float h00 = texture(u_height, uv00).r;
-  float h10 = texture(u_height, uv10).r;
-  float h01 = texture(u_height, uv01).r;
-  float h11 = texture(u_height, uv11).r;
+  vec2 h00 = texture(u_height, uv00).rg;
+  vec2 h10 = texture(u_height, uv10).rg;
+  vec2 h01 = texture(u_height, uv01).rg;
+  vec2 h11 = texture(u_height, uv11).rg;
   return mix(mix(h00, h10, fracPart.x), mix(h01, h11, fracPart.x), fracPart.y);
+}
+
+float terrainAt(vec2 uv) {
+  return heightPairAt(uv).r;
+}
+
+float obstacleAt(vec2 uv) {
+  return heightPairAt(uv).g;
 }
 
 vec4 solveCoverage(vec2 terrainUv) {
@@ -176,8 +193,8 @@ vec4 solveCoverage(vec2 terrainUv) {
     return vec4(u_maxAltitudeM + 1.0, 0.0, rangePass, distanceM);
   }
 
-  float operatorAbsM = heightAt(u_operatorUv) + u_antennaHeightM;
-  float targetTerrainM = heightAt(terrainUv);
+  float operatorAbsM = terrainAt(u_operatorUv) + u_antennaHeightM;
+  float targetTerrainM = terrainAt(terrainUv);
   float minAltitudeM = u_altitudeCriterion == 1 ? max(0.0, u_minAltitudeM) : u_minAltitudeM;
   float requiredTargetAbsM = u_altitudeCriterion == 1
     ? targetTerrainM + minAltitudeM
@@ -189,7 +206,7 @@ vec4 solveCoverage(vec2 terrainUv) {
     }
     float t = float(step) / float(u_raySteps);
     vec2 sampleUv = mix(u_operatorUv, terrainUv, t);
-    float obstacleM = heightAt(sampleUv);
+    float obstacleM = obstacleAt(sampleUv);
     requiredTargetAbsM = max(requiredTargetAbsM, operatorAbsM + (obstacleM - operatorAbsM) / max(t, 0.001));
   }
 
@@ -250,10 +267,12 @@ export class GpuCoverageLayer {
   private readonly cpuCanvas: HTMLCanvasElement;
   private readonly gpuCanvas: HTMLCanvasElement;
   private readonly tileCache = new Map<string, Promise<DecodedTile>>();
+  private readonly buildingTileLoader: BuildingHeightTileLoader;
   private analysis: AnalysisRequest | null = null;
   private debugMode: DebugMode = "combined";
   private bounds: MercatorBounds | null = null;
   private heightData: Float32Array | null = null;
+  private obstacleData: Float32Array | null = null;
   private demSignature = "";
   private demZoom: number | null = null;
   private demTileCount = 0;
@@ -294,6 +313,7 @@ export class GpuCoverageLayer {
     this.numericFramebuffer = numericFramebuffer;
     this.cpuCanvas = document.createElement("canvas");
     this.gpuCanvas = document.createElement("canvas");
+    this.buildingTileLoader = new BuildingHeightTileLoader(options.mapboxToken);
     this.initNumericTarget();
     this.initGeometry(this.numericProgram);
     this.initGeometry(this.colorProgram);
@@ -315,6 +335,7 @@ export class GpuCoverageLayer {
     this.demZoom = z;
     const signature = [
       z,
+      analysis.includeBuildings ? "buildings" : "terrain",
       bounds.west.toFixed(8),
       bounds.north.toFixed(8),
       bounds.east.toFixed(8),
@@ -331,12 +352,21 @@ export class GpuCoverageLayer {
     const demBuildStartedAt = performance.now();
     this.bounds = bounds;
     this.heightData = await this.buildHeightTexture(bounds, z);
+    let buildingBuildMs: number | undefined;
+    if (analysis.includeBuildings) {
+      const buildingBuildStartedAt = performance.now();
+      this.obstacleData = await this.buildObstacleTexture(bounds, this.heightData);
+      buildingBuildMs = performance.now() - buildingBuildStartedAt;
+    } else {
+      this.obstacleData = null;
+    }
     const demBuildMs = performance.now() - demBuildStartedAt;
     const demUploadStartedAt = performance.now();
-    this.uploadHeightTexture(this.heightData);
+    this.uploadHeightTexture(this.heightData, this.obstacleData);
     const demUploadMs = performance.now() - demUploadStartedAt;
     this.lastUpdateTimings = {
       demBuildMs,
+      buildingBuildMs,
       demUploadMs,
       updateAnalysisMs: performance.now() - startedAt,
     };
@@ -347,6 +377,7 @@ export class GpuCoverageLayer {
     debugMode: DebugMode,
     bounds: MercatorBounds,
     elevations: Float32Array,
+    obstacleElevations: Float32Array | null = null,
   ): void {
     this.analysis = analysis;
     this.debugMode = debugMode;
@@ -358,10 +389,11 @@ export class GpuCoverageLayer {
     }
     this.bounds = bounds;
     this.heightData = elevations;
+    this.obstacleData = obstacleElevations;
     this.demSignature = "";
     this.demZoom = null;
     this.demTileCount = 0;
-    this.uploadHeightTexture(elevations);
+    this.uploadHeightTexture(elevations, obstacleElevations);
   }
 
   render(waitForCompletion = false): CoverageOverlay | null {
@@ -444,6 +476,7 @@ export class GpuCoverageLayer {
       height: this.options.texturePx,
       bounds: this.bounds,
       elevations: this.heightData,
+      obstacleElevations: this.obstacleData ?? undefined,
     };
     let minHeightM = Infinity;
     let maxHeightM = -Infinity;
@@ -454,7 +487,7 @@ export class GpuCoverageLayer {
         if (dx * dx + dy * dy > 1) {
           continue;
         }
-        const heightM = sampleHeightField(field, gridCellMercator(spec, x, y));
+        const heightM = sampleObstacleHeightField(field, gridCellMercator(spec, x, y));
         minHeightM = Math.min(minHeightM, heightM);
         maxHeightM = Math.max(maxHeightM, heightM);
       }
@@ -466,7 +499,7 @@ export class GpuCoverageLayer {
         if (dx * dx + dy * dy > 1) {
           continue;
         }
-        const heightM = sampleHeightField(field, gridCellMercator(spec, x, y));
+        const heightM = sampleObstacleHeightField(field, gridCellMercator(spec, x, y));
         const [r, g, b, a] = shadeHeightMap(heightM, minHeightM, maxHeightM);
         const offset = (y * this.canvas.width + x) * 4;
         imageData.data[offset] = r;
@@ -503,6 +536,7 @@ export class GpuCoverageLayer {
       height: this.options.texturePx,
       bounds: this.bounds,
       elevations: this.heightData,
+      obstacleElevations: this.obstacleData ?? undefined,
     };
     const pixels = solveHeightFieldGrid(spec, field);
     const requiredAltitudeM = new Float32Array(pixels.length);
@@ -614,8 +648,24 @@ export class GpuCoverageLayer {
     return output;
   }
 
-  private uploadHeightTexture(data: Float32Array): void {
+  private async buildObstacleTexture(bounds: MercatorBounds, terrainData: Float32Array): Promise<Float32Array> {
+    const texturePx = this.options.texturePx;
+    const buildingField = await this.buildingTileLoader.buildHeightField(bounds, texturePx, texturePx);
+    const output = new Float32Array(terrainData.length);
+    for (let index = 0; index < output.length; index++) {
+      output[index] = (terrainData[index] ?? 0) + (buildingField.buildingHeightsM[index] ?? 0);
+    }
+    return output;
+  }
+
+  private uploadHeightTexture(terrainData: Float32Array, obstacleData: Float32Array | null = null): void {
     const gl = this.gl;
+    const textureData = new Float32Array(terrainData.length * 2);
+    for (let index = 0; index < terrainData.length; index++) {
+      const terrainM = terrainData[index] ?? 0;
+      textureData[index * 2] = terrainM;
+      textureData[index * 2 + 1] = obstacleData?.[index] ?? terrainM;
+    }
     gl.bindTexture(gl.TEXTURE_2D, this.heightTexture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
@@ -625,13 +675,13 @@ export class GpuCoverageLayer {
     gl.texImage2D(
       gl.TEXTURE_2D,
       0,
-      gl.R32F,
+      gl.RG32F,
       this.options.texturePx,
       this.options.texturePx,
       0,
-      gl.RED,
+      gl.RG,
       gl.FLOAT,
-      data,
+      textureData,
     );
   }
 

@@ -778,9 +778,11 @@ export function App() {
 
   const coverageEngineLabel =
     coverageEngine === "gpu"
-      ? "GPU terrain"
+      ? analysis.includeBuildings
+        ? "GPU terrain + buildings"
+        : "GPU terrain"
       : analysis.includeBuildings && preferredCoverageEngine === "gpu"
-        ? "CPU buildings"
+        ? "CPU fallback"
         : preferredCoverageEngine === "gpu"
           ? "CPU fallback"
           : analysis.includeBuildings
@@ -790,7 +792,7 @@ export function App() {
   async function refreshCoverageLayer(map: mapboxgl.Map, nextAnalysis: AnalysisRequest, nextDebugMode: DebugMode) {
     const sequence = ++coverageRenderSeqRef.current;
     setMapboxTerrainEnabled(map, shouldUseMapboxTerrain());
-    if (!nextAnalysis.includeBuildings && token) {
+    if (token) {
       try {
         const mapboxToken = token;
         if (!gpuCoverageRef.current) {
@@ -1310,9 +1312,7 @@ export function App() {
             </button>
           </div>
           <output>
-            {preferredCoverageEngine === "gpu" && analysis.includeBuildings
-              ? "GPU selected, CPU active for buildings"
-              : `Active renderer: ${coverageEngine === "gpu" ? "GPU" : "CPU"}`}
+            {`Active renderer: ${coverageEngine === "gpu" ? "GPU" : "CPU"}`}
           </output>
 
           <label>

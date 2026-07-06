@@ -27,6 +27,7 @@ export type HeightField = {
   height: number;
   bounds: MercatorBounds;
   elevations: Float32Array;
+  obstacleElevations?: Float32Array;
 };
 
 export function createCoverageGridSpec(
@@ -71,7 +72,7 @@ export function isGridCellInCircle(spec: CoverageGridSpec, x: number, y: number)
   return dx * dx + dy * dy <= 1;
 }
 
-export function sampleHeightField(field: HeightField, point: WebMercator): number {
+function sampleFieldData(field: HeightField, point: WebMercator, data: Float32Array): number {
   const uv = mercatorToTextureUv(point, field.bounds);
   const x = Math.max(0, Math.min(field.width - 1, uv.u * field.width - 0.5));
   const y = Math.max(0, Math.min(field.height - 1, uv.v * field.height - 0.5));
@@ -81,13 +82,21 @@ export function sampleHeightField(field: HeightField, point: WebMercator): numbe
   const y1 = Math.min(field.height - 1, y0 + 1);
   const tx = x - x0;
   const ty = y - y0;
-  const h00 = field.elevations[y0 * field.width + x0] ?? 0;
-  const h10 = field.elevations[y0 * field.width + x1] ?? h00;
-  const h01 = field.elevations[y1 * field.width + x0] ?? h00;
-  const h11 = field.elevations[y1 * field.width + x1] ?? h10;
+  const h00 = data[y0 * field.width + x0] ?? 0;
+  const h10 = data[y0 * field.width + x1] ?? h00;
+  const h01 = data[y1 * field.width + x0] ?? h00;
+  const h11 = data[y1 * field.width + x1] ?? h10;
   const top = h00 + (h10 - h00) * tx;
   const bottom = h01 + (h11 - h01) * tx;
   return top + (bottom - top) * ty;
+}
+
+export function sampleHeightField(field: HeightField, point: WebMercator): number {
+  return sampleFieldData(field, point, field.elevations);
+}
+
+export function sampleObstacleHeightField(field: HeightField, point: WebMercator): number {
+  return sampleFieldData(field, point, field.obstacleElevations ?? field.elevations);
 }
 
 export function solveHeightFieldPixel(
@@ -157,7 +166,7 @@ export function evaluateHeightFieldLosRay(
       x: spec.operatorMercator.x + (targetMercator.x - spec.operatorMercator.x) * t,
       y: spec.operatorMercator.y + (targetMercator.y - spec.operatorMercator.y) * t,
     };
-    const obstacleM = sampleHeightField(field, sample);
+    const obstacleM = sampleObstacleHeightField(field, sample);
     requiredTargetAbsM = Math.max(requiredTargetAbsM, operatorAbsM + (obstacleM - operatorAbsM) / t);
   }
 

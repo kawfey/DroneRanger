@@ -69,6 +69,20 @@ function highTargetField(spec: ReturnType<typeof createCoverageGridSpec>): Heigh
   return field;
 }
 
+function buildingBlockerField(spec: ReturnType<typeof createCoverageGridSpec>): HeightField {
+  const field = flatHeightField(spec, 0);
+  const obstacleElevations = new Float32Array(field.elevations);
+  for (let y = 0; y < spec.gridSizePx; y++) {
+    for (let x = Math.floor(spec.gridSizePx * 0.58); x < Math.floor(spec.gridSizePx * 0.64); x++) {
+      obstacleElevations[y * spec.gridSizePx + x] = 90;
+    }
+  }
+  return {
+    ...field,
+    obstacleElevations,
+  };
+}
+
 async function validateScenario(
   layer: GpuCoverageLayer,
   name: string,
@@ -78,7 +92,7 @@ async function validateScenario(
 ): Promise<ValidationResult> {
   const spec = createCoverageGridSpec(request, debugMode);
   const cpu = solveHeightFieldGrid(spec, field);
-  layer.updateHeightFieldForValidation(request, debugMode, spec.bounds, field.elevations);
+  layer.updateHeightFieldForValidation(request, debugMode, spec.bounds, field.elevations, field.obstacleElevations ?? null);
   const gpuImage = layer.render();
   const cpuImage = layer.renderCpuReference();
   const gpu = layer.readNumericCoverage();
@@ -226,6 +240,11 @@ window.runGpuCoverageValidation = async () => {
   const cutoffSpec = createCoverageGridSpec(cutoffRequest, "combined");
   const highTargetRequest = makeRequest({ altitude: { ...defaultAnalysis.altitude, maxM: 70 } });
   const highTargetSpec = createCoverageGridSpec(highTargetRequest, "los");
+  const buildingBlockerRequest = makeRequest({
+    includeBuildings: true,
+    altitude: { ...defaultAnalysis.altitude, maxM: 70 },
+  });
+  const buildingBlockerSpec = createCoverageGridSpec(buildingBlockerRequest, "los");
   const losFootprintRequest = makeRequest({
     radiusM: 4000,
     gridSizePx: 100,
@@ -238,6 +257,13 @@ window.runGpuCoverageValidation = async () => {
       await validateScenario(layer, "flat terrain", flatRequest, "combined", flatHeightField(flatSpec, 0)),
       await validateScenario(layer, "single ridge", ridgeRequest, "los", ridgeField(ridgeSpec, 80)),
       await validateScenario(layer, "high target terrain", highTargetRequest, "los", highTargetField(highTargetSpec)),
+      await validateScenario(
+        layer,
+        "building obstacle surface",
+        buildingBlockerRequest,
+        "los",
+        buildingBlockerField(buildingBlockerSpec),
+      ),
       await validateScenario(layer, "manual range cutoff", cutoffRequest, "combined", flatHeightField(cutoffSpec, 0)),
       await validateLosFootprintDiameter(layer, losFootprintRequest),
     ];

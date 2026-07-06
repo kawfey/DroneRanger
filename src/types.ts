@@ -72,6 +72,7 @@ export type CoverageTimings = {
   updateAnalysisMs?: number;
   renderMs?: number;
   demBuildMs?: number;
+  buildingBuildMs?: number;
   demUploadMs?: number;
   cpuSolveMs?: number;
   cpuShadeMs?: number;
