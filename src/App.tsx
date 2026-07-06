@@ -1250,6 +1250,8 @@ export function App() {
             <dd>{inspector.violationCriteria}</dd>
             <dt>Min. elevation change</dt>
             <dd>{inspector.requiredElevationChangeM.toFixed(1)} m</dd>
+            <dt>Min. drone altitude (AGL)</dt>
+            <dd>{inspector.minDroneAltitudeAglM.toFixed(1)} m</dd>
             <dt>Operator altitude (ASL)</dt>
             <dd>{inspector.operatorAltitudeAslM.toFixed(1)} m</dd>
             {debugMode !== "combined" && debugMode !== "los" && inspector.modeMarginDb !== null && (

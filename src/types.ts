@@ -89,6 +89,7 @@ export type CoverageGridData = {
 export type CoveragePixel = {
   requiredAltitudeM: number;
   requiredElevationChangeM: number;
+  minDroneAltitudeAglM: number;
   operatorAltitudeAslM: number;
   violationCriteria: string;
   reachable: boolean;

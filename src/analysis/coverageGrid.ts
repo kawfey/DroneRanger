@@ -8,6 +8,10 @@ export const coverageRaySteps = 24;
 export const minCoverageGridPx = 25;
 export const maxCoverageGridPx = 384;
 
+function altitudeAglM(requiredTargetAbsM: number, targetTerrainM: number): number {
+  return Math.max(0, requiredTargetAbsM - targetTerrainM);
+}
+
 export type CoverageGridSpec = {
   request: AnalysisRequest;
   debugMode: DebugMode;
@@ -117,6 +121,7 @@ export function solveHeightFieldPixel(
   return {
     requiredAltitudeM: los.requiredAltitudeM,
     requiredElevationChangeM: los.requiredElevationChangeM,
+    minDroneAltitudeAglM: los.minDroneAltitudeAglM,
     operatorAltitudeAslM: los.operatorAltitudeAslM,
     violationCriteria: criteria.size > 0 ? [...criteria].join(", ") : "None",
     reachable: criteria.size === 0,
@@ -137,6 +142,7 @@ export function evaluateHeightFieldLosRay(
 ): {
   requiredAltitudeM: number;
   requiredElevationChangeM: number;
+  minDroneAltitudeAglM: number;
   operatorAltitudeAslM: number;
 } {
   const request = spec.request;
@@ -161,6 +167,7 @@ export function evaluateHeightFieldLosRay(
   return {
     requiredAltitudeM: requiredTargetAbsM - operatorAbsM,
     requiredElevationChangeM: requiredTargetAbsM - operatorAbsM,
+    minDroneAltitudeAglM: altitudeAglM(requiredTargetAbsM, targetTerrain),
     operatorAltitudeAslM: operatorAbsM,
   };
 }

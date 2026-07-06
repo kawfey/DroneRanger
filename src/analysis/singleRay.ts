@@ -10,6 +10,10 @@ import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile } from "../
 const raySteps = 24;
 const maxRfAnalysisRadiusM = 100000;
 
+function altitudeAglM(requiredTargetAbsM: number, targetTerrainM: number): number {
+  return Math.max(0, requiredTargetAbsM - targetTerrainM);
+}
+
 export type TerrainSampler = {
   queryTerrainElevation(
     lngLat: { lng: number; lat: number },
@@ -102,6 +106,7 @@ export function inspectFlatEarthPixel(
   return {
     requiredAltitudeM: request.altitude.minM,
     requiredElevationChangeM: request.altitude.minM,
+    minDroneAltitudeAglM: Math.max(0, request.altitude.minM),
     operatorAltitudeAslM: operatorAbsM,
     violationCriteria: criteriaLabel(criteria),
     reachable,
@@ -190,6 +195,7 @@ export function inspectTerrainPixel(
     ...pixel,
     requiredAltitudeM: los.requiredAltitudeM,
     requiredElevationChangeM: los.requiredElevationChangeM,
+    minDroneAltitudeAglM: altitudeAglM(los.requiredTargetAbsM, los.targetTerrainM),
     operatorAltitudeAslM: los.operatorAltitudeAslM,
     violationCriteria: criteriaLabel(criteria),
     reachable,
