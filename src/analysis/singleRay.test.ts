@@ -41,6 +41,23 @@ describe("single ray inspector", () => {
     expect(inspected.violationCriteria).toBe("Terrain");
   });
 
+  it("requires altitude when the target terrain is higher than the operator", () => {
+    const target = {
+      lng: defaultAnalysis.operator.lng + 0.01,
+      lat: defaultAnalysis.operator.lat,
+    };
+    const highTargetMap = {
+      queryTerrainElevation: (lngLat: { lng: number }) =>
+        lngLat.lng === target.lng ? 180 : 0,
+    };
+
+    const inspected = inspectTerrainPixel(highTargetMap, defaultAnalysis, target, "los");
+
+    expect(inspected.requiredElevationChangeM).toBeCloseTo(178.5);
+    expect(inspected.reachable).toBe(false);
+    expect(inspected.violationCriteria).toBe("Terrain");
+  });
+
   it("uses Mapbox building blockers only when enabled", () => {
     const target = {
       lng: defaultAnalysis.operator.lng + 0.01,

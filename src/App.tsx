@@ -21,7 +21,15 @@ import {
   mercator01ToLngLat,
   metersToMercatorUnits,
 } from "./analysis/coordinates";
-import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile, LinkProfileId } from "./types";
+import { GpuCoverageLayer, type GpuCoverageImage } from "./gpuCoverageLayer";
+import type {
+  AnalysisRequest,
+  CoverageEngine,
+  CoveragePixel,
+  DebugMode,
+  LinkProfile,
+  LinkProfileId,
+} from "./types";
 
 const token = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
 
@@ -72,6 +80,7 @@ type CoverageImage = {
 const minCoverageGridPx = 25;
 const maxCoverageGridPx = 384;
 const coverageTexturePx = 768;
+const enableGpuCoverage = true;
 
 function profileLabel(id: LinkProfileId): string {
   return id[0].toUpperCase() + id.slice(1);
@@ -235,12 +244,10 @@ function renderCoverageImage(
   };
 }
 
-function updateCoverageLayer(
+function applyCoverageImageLayer(
   map: mapboxgl.Map,
-  analysis: AnalysisRequest,
-  debugMode: DebugMode,
+  image: CoverageImage | GpuCoverageImage,
 ): void {
-  const image = renderCoverageImage(map, analysis, debugMode);
   const source = map.getSource("los-coverage") as
     | (mapboxgl.ImageSource & {
         updateImage?: (image: { url: string; coordinates: CoverageImage["coordinates"] }) => void;
@@ -274,6 +281,14 @@ function updateCoverageLayer(
   }
   map.setPaintProperty("los-coverage", "raster-resampling", "nearest");
   map.setPaintProperty("los-coverage", "raster-fade-duration", 0);
+}
+
+function updateCoverageLayer(
+  map: mapboxgl.Map,
+  analysis: AnalysisRequest,
+  debugMode: DebugMode,
+): void {
+  applyCoverageImageLayer(map, renderCoverageImage(map, analysis, debugMode));
 }
 
 function stylePreviewUrl(style: MapStyleTemplate): string {
@@ -341,7 +356,6 @@ function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisRequest, deb
     });
   }
 
-  updateCoverageLayer(map, analysis, debugMode);
 }
 
 function operatorFromLngLat(
@@ -357,6 +371,8 @@ function operatorFromLngLat(
 
 export function App() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
+  const gpuCoverageRef = useRef<GpuCoverageLayer | null>(null);
+  const coverageRenderSeqRef = useRef(0);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
   const previousStyleUriRef = useRef(mapStyleTemplates[0].uri);
@@ -365,11 +381,53 @@ export function App() {
   const [inspector, setInspector] = useState<CoveragePixel | null>(null);
   const [inspectorTarget, setInspectorTarget] = useState<InspectorTarget | null>(null);
   const [mapDataRevision, setMapDataRevision] = useState(0);
+  const [coverageEngine, setCoverageEngine] = useState<CoverageEngine>("cpu-fallback");
   const [selectedStyleId, setSelectedStyleId] = useState(mapStyleTemplates[0].id);
   const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
   const hasToken = Boolean(token && token !== "your_mapbox_token_here");
   const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? mapStyleTemplates[0];
   const latestAnalysisRef = useRef(analysis);
+
+  const coverageEngineLabel =
+    coverageEngine === "gpu"
+      ? "GPU terrain"
+      : analysis.includeBuildings
+        ? "CPU buildings"
+        : "CPU fallback";
+
+  async function refreshCoverageLayer(map: mapboxgl.Map, nextAnalysis: AnalysisRequest, nextDebugMode: DebugMode) {
+    const sequence = ++coverageRenderSeqRef.current;
+    if (enableGpuCoverage && !nextAnalysis.includeBuildings && token) {
+      try {
+        const mapboxToken = token;
+        if (!gpuCoverageRef.current) {
+          gpuCoverageRef.current = GpuCoverageLayer.create({
+            mapboxToken,
+            texturePx: coverageTexturePx,
+            coordinatesForAnalysis: coverageImageCoordinates,
+          });
+        }
+        const gpuCoverage = gpuCoverageRef.current;
+        if (gpuCoverage) {
+          await gpuCoverage.updateAnalysis(nextAnalysis, nextDebugMode);
+          const image = gpuCoverage.render();
+          if (image && sequence === coverageRenderSeqRef.current && map.isStyleLoaded()) {
+            applyCoverageImageLayer(map, image);
+            setCoverageEngine("gpu");
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn("GPU coverage renderer failed; falling back to CPU coverage.", error);
+      }
+    }
+
+    if (sequence !== coverageRenderSeqRef.current || !map.isStyleLoaded()) {
+      return;
+    }
+    updateCoverageLayer(map, nextAnalysis, nextDebugMode);
+    setCoverageEngine("cpu-fallback");
+  }
 
   const activeProfiles = useMemo(
     () => analysis.profiles.filter((profile) => analysis.selectedProfileIds.includes(profile.id)),
@@ -447,13 +505,15 @@ export function App() {
     map.on("load", () => {
       installAnalysisLayers(map, analysis, debugMode);
       map.once("idle", () => {
-        updateCoverageLayer(map, latestAnalysisRef.current, debugMode);
+        void refreshCoverageLayer(map, latestAnalysisRef.current, debugMode);
         setMapDataRevision((revision) => revision + 1);
       });
     });
 
     return () => {
       markerRef.current?.remove();
+      gpuCoverageRef.current?.dispose();
+      gpuCoverageRef.current = null;
       map.remove();
       mapRef.current = null;
     };
@@ -464,7 +524,7 @@ export function App() {
     markerRef.current?.setLngLat([analysis.operator.lng, analysis.operator.lat]);
     if (mapRef.current?.isStyleLoaded()) {
       updateReferenceCircle(mapRef.current, analysis);
-      updateCoverageLayer(mapRef.current, analysis, debugMode);
+      void refreshCoverageLayer(mapRef.current, analysis, debugMode);
     }
   }, [analysis, debugMode]);
 
@@ -477,7 +537,7 @@ export function App() {
     map.once("style.load", () => {
       installAnalysisLayers(map, latestAnalysisRef.current, debugMode);
       map.once("idle", () => {
-        updateCoverageLayer(map, latestAnalysisRef.current, debugMode);
+        void refreshCoverageLayer(map, latestAnalysisRef.current, debugMode);
         setMapDataRevision((revision) => revision + 1);
       });
     });
@@ -962,7 +1022,10 @@ export function App() {
 
       <div className="hint">
         <Layers size={14} />
-        <span>Drag marker or Shift-click to place operator. Click coverage for inspection.</span>
+        <span>
+          Drag marker or Shift-click to place operator. Click coverage for inspection. Engine:{" "}
+          {coverageEngineLabel}.
+        </span>
       </div>
     </main>
   );

@@ -52,6 +52,8 @@ export type DebugMode =
   | "los"
   | "blocker";
 
+export type CoverageEngine = "gpu" | "cpu-fallback";
+
 export type CoveragePixel = {
   requiredAltitudeM: number;
   requiredElevationChangeM: number;

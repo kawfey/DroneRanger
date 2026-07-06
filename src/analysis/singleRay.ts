@@ -141,7 +141,10 @@ export function evaluateTerrainLosRay(
   const operatorAbsM = operatorTerrain + request.operator.antennaHeightM;
   const operatorMercator = lngLatToMercator01(request.operator.lng, request.operator.lat);
   const targetMercator = lngLatToMercator01(target.lng, target.lat);
-  let requiredTargetAbsM = operatorAbsM + request.altitude.minM;
+  let requiredTargetAbsM = Math.max(
+    operatorAbsM + request.altitude.minM,
+    targetTerrain + request.altitude.minM,
+  );
   let limitingObstacle: ObstacleSample["source"] | null = null;
 
   for (let step = 1; step < raySteps; step++) {
