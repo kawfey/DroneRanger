@@ -28,6 +28,8 @@ type DecodedTile = {
 export type GpuCoverageDebugStats = {
   demZoom: number | null;
   demTileCount: number;
+  heightTexturePx: number;
+  coverageGridPx: number;
   heightMinM: number;
   heightMaxM: number;
   heightMeanM: number;
@@ -51,6 +53,7 @@ const numericFragmentShaderSource = `#version 300 es
 precision highp float;
 
 uniform sampler2D u_height;
+uniform float u_heightTexturePx;
 uniform vec2 u_operatorUv;
 uniform float u_antennaHeightM;
 uniform float u_minAltitudeM;
@@ -64,11 +67,27 @@ in vec2 v_uv;
 out vec4 outData;
 
 float heightAt(vec2 uv) {
-  return texture(u_height, clamp(uv, vec2(0.0), vec2(1.0))).r;
+  vec2 clampedUv = clamp(uv, vec2(0.0), vec2(1.0));
+  vec2 pixel = clampedUv * u_heightTexturePx - 0.5;
+  vec2 base = floor(pixel);
+  vec2 fracPart = pixel - base;
+  vec2 maxPixel = vec2(u_heightTexturePx - 1.0);
+  vec2 p00 = clamp(base, vec2(0.0), maxPixel);
+  vec2 p11 = clamp(base + vec2(1.0), vec2(0.0), maxPixel);
+  vec2 uv00 = (p00 + 0.5) / u_heightTexturePx;
+  vec2 uv10 = (vec2(p11.x, p00.y) + 0.5) / u_heightTexturePx;
+  vec2 uv01 = (vec2(p00.x, p11.y) + 0.5) / u_heightTexturePx;
+  vec2 uv11 = (p11 + 0.5) / u_heightTexturePx;
+  float h00 = texture(u_height, uv00).r;
+  float h10 = texture(u_height, uv10).r;
+  float h01 = texture(u_height, uv01).r;
+  float h11 = texture(u_height, uv11).r;
+  return mix(mix(h00, h10, fracPart.x), mix(h01, h11, fracPart.x), fracPart.y);
 }
 
 void main() {
-  vec2 circle = v_uv * 2.0 - 1.0;
+  vec2 terrainUv = vec2(v_uv.x, 1.0 - v_uv.y);
+  vec2 circle = terrainUv * 2.0 - 1.0;
   if (dot(circle, circle) > 1.0) {
     outData = vec4(0.0, 0.0, 0.0, 0.0);
     return;
@@ -82,7 +101,7 @@ void main() {
   }
 
   float operatorAbsM = heightAt(u_operatorUv) + u_antennaHeightM;
-  float targetTerrainM = heightAt(v_uv);
+  float targetTerrainM = heightAt(terrainUv);
   float requiredTargetAbsM = max(operatorAbsM + u_minAltitudeM, targetTerrainM + u_minAltitudeM);
 
   for (int step = 1; step < 128; step++) {
@@ -90,7 +109,7 @@ void main() {
       break;
     }
     float t = float(step) / float(u_raySteps);
-    vec2 sampleUv = mix(u_operatorUv, v_uv, t);
+    vec2 sampleUv = mix(u_operatorUv, terrainUv, t);
     float obstacleM = heightAt(sampleUv);
     requiredTargetAbsM = max(requiredTargetAbsM, operatorAbsM + (obstacleM - operatorAbsM) / max(t, 0.001));
   }
@@ -205,7 +224,7 @@ export class GpuCoverageLayer {
       bounds.north.toFixed(8),
       bounds.east.toFixed(8),
       bounds.south.toFixed(8),
-      this.canvas.width,
+      this.options.texturePx,
     ].join(":");
 
     if (signature === this.demSignature) {
@@ -255,6 +274,7 @@ export class GpuCoverageLayer {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.heightTexture);
     setUniform1i(gl, this.numericProgram, "u_height", 0);
+    setUniform1f(gl, this.numericProgram, "u_heightTexturePx", this.options.texturePx);
     setUniform2f(gl, this.numericProgram, "u_operatorUv", operatorUv.u, operatorUv.v);
     setUniform1f(gl, this.numericProgram, "u_antennaHeightM", this.analysis.operator.antennaHeightM);
     setUniform1f(gl, this.numericProgram, "u_minAltitudeM", this.analysis.altitude.minM);
@@ -340,6 +360,8 @@ export class GpuCoverageLayer {
     return {
       demZoom: this.demZoom,
       demTileCount: this.demTileCount,
+      heightTexturePx: this.options.texturePx,
+      coverageGridPx: this.canvas.width,
       heightMinM,
       heightMaxM,
       heightMeanM: heightSumM / this.heightData.length,
@@ -355,7 +377,7 @@ export class GpuCoverageLayer {
     const tileIds = coveringDemTiles(bounds, z);
     this.demTileCount = tileIds.length;
     const tiles = await Promise.all(tileIds.map((tile) => this.loadTile(tile)));
-    const texturePx = this.canvas.width;
+    const texturePx = this.options.texturePx;
     const output = new Float32Array(texturePx * texturePx);
     const scale = 2 ** z;
 
@@ -371,9 +393,9 @@ export class GpuCoverageLayer {
           output[y * texturePx + x] = 0;
           continue;
         }
-        const localX = Math.max(0, Math.min(tile.width - 1, Math.floor((mercatorX * scale - tileX) * tile.width)));
-        const localY = Math.max(0, Math.min(tile.height - 1, Math.floor((mercatorY * scale - tileY) * tile.height)));
-        output[y * texturePx + x] = tile.elevations[localY * tile.width + localX] ?? 0;
+        const localX = (mercatorX * scale - tileX) * tile.width - 0.5;
+        const localY = (mercatorY * scale - tileY) * tile.height - 0.5;
+        output[y * texturePx + x] = sampleDecodedTile(tile, localX, localY);
       }
     }
 
@@ -392,8 +414,8 @@ export class GpuCoverageLayer {
       gl.TEXTURE_2D,
       0,
       gl.R32F,
-      this.canvas.width,
-      this.canvas.height,
+      this.options.texturePx,
+      this.options.texturePx,
       0,
       gl.RED,
       gl.FLOAT,
@@ -469,6 +491,24 @@ async function loadTerrainTile(tile: DemTileId, token: string): Promise<DecodedT
     height: canvas.height,
     elevations,
   };
+}
+
+function sampleDecodedTile(tile: DecodedTile, x: number, y: number): number {
+  const clampedX = Math.max(0, Math.min(tile.width - 1, x));
+  const clampedY = Math.max(0, Math.min(tile.height - 1, y));
+  const x0 = Math.floor(clampedX);
+  const y0 = Math.floor(clampedY);
+  const x1 = Math.min(tile.width - 1, x0 + 1);
+  const y1 = Math.min(tile.height - 1, y0 + 1);
+  const tx = clampedX - x0;
+  const ty = clampedY - y0;
+  const h00 = tile.elevations[y0 * tile.width + x0] ?? 0;
+  const h10 = tile.elevations[y0 * tile.width + x1] ?? h00;
+  const h01 = tile.elevations[y1 * tile.width + x0] ?? h00;
+  const h11 = tile.elevations[y1 * tile.width + x1] ?? h10;
+  const top = h00 + (h10 - h00) * tx;
+  const bottom = h01 + (h11 - h01) * tx;
+  return top + (bottom - top) * ty;
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {

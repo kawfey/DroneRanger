@@ -1,8 +1,11 @@
 import { createRequire } from "node:module";
-import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { createServer } from "vite";
 
 const require = createRequire(import.meta.url);
+const port = Number(process.env.GPU_TEST_PORT ?? 5177);
+const host = "127.0.0.1";
+const validationTimeoutMs = Number(process.env.GPU_TEST_TIMEOUT_MS ?? 45000);
 
 function loadPlaywright() {
   try {
@@ -16,72 +19,55 @@ function loadPlaywright() {
   }
 }
 
-function waitForServer(url, timeoutMs = 30000) {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const tick = async () => {
-      try {
-        const response = await fetch(url);
-        if (response.ok) {
-          resolve();
-          return;
-        }
-      } catch {
-        // Server is still starting.
-      }
-      if (Date.now() - started > timeoutMs) {
-        reject(new Error(`Timed out waiting for ${url}`));
-        return;
-      }
-      setTimeout(tick, 250);
-    };
-    tick();
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
   });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-const port = 5177;
-const baseUrl = `http://127.0.0.1:${port}`;
-const serverCommand =
-  process.platform === "win32"
-    ? ["cmd.exe", ["/d", "/s", "/c", "pnpm exec vite --host 127.0.0.1 --port 5177 --strictPort"]]
-    : ["pnpm", ["exec", "vite", "--host", "127.0.0.1", "--port", String(port), "--strictPort"]];
-const server = spawn(serverCommand[0], serverCommand[1], {
-  stdio: ["ignore", "pipe", "pipe"],
-  shell: false,
+const server = await createServer({
+  server: {
+    host,
+    port,
+    strictPort: true,
+  },
+  logLevel: "error",
 });
 
-let stderr = "";
-server.stderr.on("data", (chunk) => {
-  stderr += chunk.toString();
-});
+let browser;
 
 try {
-  await waitForServer(`${baseUrl}/gpu-validation.html`);
+  await server.listen();
   const { chromium } = loadPlaywright();
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
-    await page.goto(`${baseUrl}/gpu-validation.html`, { waitUntil: "networkidle" });
-    const results = await page.evaluate(async () => {
-      if (!window.runGpuCoverageValidation) {
-        throw new Error("Validation page did not register runGpuCoverageValidation");
-      }
-      return window.runGpuCoverageValidation();
-    });
-    console.table(results);
-    const failed = results.filter((result) => !result.passed);
-    if (failed.length > 0) {
-      throw new Error(`${failed.length} GPU validation scenario(s) failed`);
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  page.setDefaultTimeout(15000);
+  page.on("pageerror", (error) => {
+    console.error(error);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      console.error(message.text());
     }
-  } finally {
-    await browser.close();
+  });
+
+  await page.goto(`http://${host}:${port}/gpu-validation.html`, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.runGpuCoverageValidation));
+
+  const results = await withTimeout(
+    page.evaluate(() => window.runGpuCoverageValidation?.()),
+    validationTimeoutMs,
+    "GPU validation",
+  );
+
+  console.table(results);
+  const failed = results.filter((result) => !result.passed);
+  if (failed.length > 0) {
+    throw new Error(`${failed.length} GPU validation scenario(s) failed`);
   }
 } finally {
-  server.kill();
+  await browser?.close();
+  await server.close();
 }
-
-server.on("exit", (code) => {
-  if (code && code !== 1) {
-    console.error(stderr);
-  }
-});

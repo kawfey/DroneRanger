@@ -104,6 +104,8 @@ declare global {
   }
 }
 
+const gpuHeightTexturePx = 768;
+
 function profileLabel(id: LinkProfileId): string {
   return id[0].toUpperCase() + id.slice(1);
 }
@@ -541,7 +543,7 @@ export function App() {
         if (!gpuCoverageRef.current) {
           gpuCoverageRef.current = GpuCoverageLayer.create({
             mapboxToken,
-            texturePx: clampGridSize(nextAnalysis.gridSizePx),
+            texturePx: gpuHeightTexturePx,
             coordinatesForAnalysis: coverageImageCoordinates,
           });
         }

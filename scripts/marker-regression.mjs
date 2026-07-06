@@ -72,6 +72,46 @@ async function normalClickMap(page, xRatio, yRatio) {
   await page.mouse.click(box.x + box.width * xRatio, box.y + box.height * yRatio);
 }
 
+async function coveragePixels(page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector("canvas[data-coverage-source=los-coverage]");
+    if (!(canvas instanceof HTMLCanvasElement)) {
+      throw new Error("coverage display canvas not found");
+    }
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) {
+      throw new Error("coverage display canvas context unavailable");
+    }
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data),
+    };
+  });
+}
+
+function averageRgbError(a, b, flipY = false) {
+  assert(a.width === b.width && a.height === b.height, "coverage canvases should have matching dimensions");
+  let error = 0;
+  let count = 0;
+  for (let y = 0; y < a.height; y++) {
+    const by = flipY ? b.height - 1 - y : y;
+    for (let x = 0; x < a.width; x++) {
+      const ai = (y * a.width + x) * 4;
+      const bi = (by * b.width + x) * 4;
+      if (a.pixels[ai + 3] === 0 && b.pixels[bi + 3] === 0) {
+        continue;
+      }
+      error +=
+        Math.abs(a.pixels[ai] - b.pixels[bi]) +
+        Math.abs(a.pixels[ai + 1] - b.pixels[bi + 1]) +
+        Math.abs(a.pixels[ai + 2] - b.pixels[bi + 2]);
+      count += 3;
+    }
+  }
+  return count > 0 ? error / count : 0;
+}
+
 async function main() {
   const server = await createServer({
     server: {
@@ -260,6 +300,30 @@ async function main() {
     assert(afterSecondShift.sourceType === "canvas", "los-coverage source should be canvas-backed after repeated moves");
     assert(afterSecondShift.sourceTypeCounts.canvas === 1, "repeated moves should keep exactly one canvas source");
     assert(afterSecondShift.sourceTypeCounts.image === undefined, "repeated moves should not leave stale image sources");
+
+    await page.getByTitle("Close inspector").click();
+    await page.locator(".inspector").waitFor({ state: "hidden", timeout: 30000 });
+    await page.getByText("Calculation settings").click();
+    await page.getByRole("button", { name: "CPU" }).click();
+    await waitForDebug(
+      page,
+      () => window.__droneRangeDebug?.preferredEngine === "cpu-fallback" && window.__droneRangeDebug?.engine === "cpu-fallback",
+      "CPU renderer did not become active",
+    );
+    const cpuPixels = await coveragePixels(page);
+    await page.getByRole("button", { name: "GPU" }).click();
+    await waitForDebug(
+      page,
+      () => window.__droneRangeDebug?.preferredEngine === "gpu" && window.__droneRangeDebug?.engine === "gpu",
+      "GPU renderer did not become active",
+    );
+    const gpuPixels = await coveragePixels(page);
+    const directError = averageRgbError(cpuPixels, gpuPixels);
+    const flippedError = averageRgbError(cpuPixels, gpuPixels, true);
+    assert(
+      directError <= flippedError,
+      `GPU coverage appears vertically flipped: direct error ${directError.toFixed(2)}, flipped error ${flippedError.toFixed(2)}`,
+    );
   } finally {
     await browser?.close();
     await server.close();

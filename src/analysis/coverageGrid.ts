@@ -69,9 +69,21 @@ export function isGridCellInCircle(spec: CoverageGridSpec, x: number, y: number)
 
 export function sampleHeightField(field: HeightField, point: WebMercator): number {
   const uv = mercatorToTextureUv(point, field.bounds);
-  const x = Math.max(0, Math.min(field.width - 1, Math.floor(uv.u * field.width)));
-  const y = Math.max(0, Math.min(field.height - 1, Math.floor(uv.v * field.height)));
-  return field.elevations[y * field.width + x] ?? 0;
+  const x = Math.max(0, Math.min(field.width - 1, uv.u * field.width - 0.5));
+  const y = Math.max(0, Math.min(field.height - 1, uv.v * field.height - 0.5));
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(field.width - 1, x0 + 1);
+  const y1 = Math.min(field.height - 1, y0 + 1);
+  const tx = x - x0;
+  const ty = y - y0;
+  const h00 = field.elevations[y0 * field.width + x0] ?? 0;
+  const h10 = field.elevations[y0 * field.width + x1] ?? h00;
+  const h01 = field.elevations[y1 * field.width + x0] ?? h00;
+  const h11 = field.elevations[y1 * field.width + x1] ?? h10;
+  const top = h00 + (h10 - h00) * tx;
+  const bottom = h01 + (h11 - h01) * tx;
+  return top + (bottom - top) * ty;
 }
 
 export function solveHeightFieldPixel(
