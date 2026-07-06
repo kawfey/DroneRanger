@@ -4,10 +4,12 @@ import {
   Activity,
   Antenna,
   ChevronDown,
+  Cuboid,
   Layers,
   MapPin,
   Radio,
   Settings,
+  Square,
 } from "lucide-react";
 import { defaultAnalysis } from "./analysis/defaults";
 import {
@@ -84,6 +86,8 @@ type InspectorTarget = {
 };
 
 const gpuHeightTexturePx = 768;
+const coverageDisplayScale = 4;
+const map3dPitch = 55;
 let coverageSourceCanvas: HTMLCanvasElement | null = null;
 
 function profileLabel(id: LinkProfileId): string {
@@ -422,6 +426,7 @@ export function App() {
   const [preferredCoverageEngine, setPreferredCoverageEngine] = useState<CoverageEngine>("gpu");
   const [selectedStyleId, setSelectedStyleId] = useState(mapStyleTemplates[0].id);
   const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
+  const [mapCamera, setMapCamera] = useState({ bearing: 0, pitch: 0 });
   const hasToken = Boolean(token && token !== "your_mapbox_token_here");
   const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? mapStyleTemplates[0];
   const latestAnalysisRef = useRef(analysis);
@@ -525,17 +530,18 @@ export function App() {
   }
 
   function applyCoverageOverlay(map: mapboxgl.Map, overlay: CoverageOverlay): void {
-    const displayCanvas = overlay.engine === "gpu" ? overlay.canvas : getCoverageDisplayCanvas();
-    if (overlay.engine !== "gpu" && displayCanvas !== overlay.canvas) {
-      displayCanvas.width = overlay.gridSizePx;
-      displayCanvas.height = overlay.gridSizePx;
-      displayCanvas.style.imageRendering = "pixelated";
-      const context = displayCanvas.getContext("2d");
-      if (context) {
-        context.imageSmoothingEnabled = false;
-        context.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
-        context.drawImage(overlay.canvas, 0, 0, displayCanvas.width, displayCanvas.height);
-      }
+    const displayCanvas = getCoverageDisplayCanvas();
+    const displaySize = overlay.gridSizePx * coverageDisplayScale;
+    if (displayCanvas.width !== displaySize || displayCanvas.height !== displaySize) {
+      displayCanvas.width = displaySize;
+      displayCanvas.height = displaySize;
+    }
+    displayCanvas.style.imageRendering = "pixelated";
+    const context = displayCanvas.getContext("2d");
+    if (context) {
+      context.imageSmoothingEnabled = false;
+      context.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+      context.drawImage(overlay.canvas, 0, 0, displayCanvas.width, displayCanvas.height);
     }
 
     ensureCoverageCanvasSource(
@@ -608,8 +614,8 @@ export function App() {
     if (sequence !== coverageRenderSeqRef.current) {
       return;
     }
-    const cpuOverlay = renderCoverageImage(map, nextAnalysis, nextDebugMode, getCoverageDisplayCanvas());
-    ensureCoverageCanvasSource(map, cpuOverlay);
+    const cpuOverlay = renderCoverageImage(map, nextAnalysis, nextDebugMode, document.createElement("canvas"));
+    applyCoverageOverlay(map, cpuOverlay);
     updateDebugState({
       coverageCoordinates: coverageImageCoordinates(nextAnalysis.operator, analysisRadiusM(nextAnalysis, nextDebugMode)),
       coverageCanvasFingerprint: canvasFingerprint(getCoverageDisplayCanvas()),
@@ -647,12 +653,21 @@ export function App() {
       antialias: false,
       preserveDrawingBuffer: false,
     });
-    map.dragRotate.disable();
     map.touchZoomRotate.disableRotation();
     map.boxZoom.disable();
-    map.setMaxPitch(0);
+    map.setMaxPitch(75);
 
     mapRef.current = map;
+    const syncMapCamera = () => {
+      setMapCamera({
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+      });
+    };
+    map.on("rotate", syncMapCamera);
+    map.on("pitch", syncMapCamera);
+    map.on("moveend", syncMapCamera);
+    syncMapCamera();
     markerRef.current = new mapboxgl.Marker({ draggable: true, color: "#1f8fff" })
       .setLngLat([analysis.operator.lng, analysis.operator.lat])
       .addTo(map);
@@ -717,6 +732,9 @@ export function App() {
       gpuCoverageRef.current = null;
       coverageDisplayCanvasRef.current?.remove();
       coverageDisplayCanvasRef.current = null;
+      map.off("rotate", syncMapCamera);
+      map.off("pitch", syncMapCamera);
+      map.off("moveend", syncMapCamera);
       map.remove();
       mapRef.current = null;
       if (import.meta.env.DEV) {
@@ -807,6 +825,23 @@ export function App() {
     setSelectedStyleId(style.id);
     setIsStyleMenuOpen(false);
   }
+
+  function resetBearingToNorth() {
+    mapRef.current?.easeTo({ bearing: 0, duration: 350 });
+  }
+
+  function toggleMapDimension() {
+    const map = mapRef.current;
+    if (!map) return;
+    const is3d = map.getPitch() > 1;
+    map.easeTo({
+      pitch: is3d ? 0 : map3dPitch,
+      bearing: is3d ? 0 : map.getBearing(),
+      duration: 450,
+    });
+  }
+
+  const isMap3d = mapCamera.pitch > 1;
 
   return (
     <main className="app">
@@ -1233,6 +1268,34 @@ export function App() {
 
       {hasToken && (
         <aside className={`style-picker ${isStyleMenuOpen ? "open" : ""}`} aria-label="Map style selector">
+          <div className="map-view-controls" aria-label="Map view controls">
+            <button
+              type="button"
+              className="map-icon-button"
+              onClick={resetBearingToNorth}
+              title="Reset north"
+              aria-label="Reset north"
+            >
+              <span
+                className="compass-face"
+                style={{ transform: `rotate(${-mapCamera.bearing}deg)` }}
+                aria-hidden="true"
+              >
+                <span className="compass-north" />
+                <span className="compass-south" />
+              </span>
+            </button>
+            <button
+              type="button"
+              className={`map-icon-button ${isMap3d ? "active" : ""}`}
+              onClick={toggleMapDimension}
+              title={isMap3d ? "Switch to top view" : "Switch to 3D view"}
+              aria-label={isMap3d ? "Switch to top view" : "Switch to 3D view"}
+            >
+              {isMap3d ? <Cuboid size={21} aria-hidden="true" /> : <Square size={21} aria-hidden="true" />}
+              <span>{isMap3d ? "3D" : "2D"}</span>
+            </button>
+          </div>
           {isStyleMenuOpen && (
             <div className="style-menu" role="listbox" aria-label="Map styles">
               {mapStyleTemplates.map((style) => (

@@ -377,6 +377,73 @@ output {
   border-radius: 8px;
 }
 
+.map-view-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.map-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(23, 32, 42, 0.16);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17202a;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 800;
+  box-shadow: 0 1px 2px rgba(8, 13, 20, 0.08);
+}
+
+.map-icon-button:hover {
+  border-color: rgba(22, 137, 106, 0.54);
+}
+
+.map-icon-button.active {
+  border-color: #16896a;
+  background: #dff4eb;
+  color: #0b5f49;
+}
+
+.map-icon-button svg {
+  flex: 0 0 auto;
+}
+
+.compass-face {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(23, 32, 42, 0.22);
+  border-radius: 50%;
+  transition: transform 120ms ease;
+}
+
+.compass-north,
+.compass-south {
+  position: absolute;
+  left: 50%;
+  width: 4px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+}
+
+.compass-north {
+  top: 3px;
+  height: 9px;
+  background: #d12828;
+}
+
+.compass-south {
+  bottom: 4px;
+  height: 7px;
+  background: #17202a;
+}
+
 .style-current,
 .style-option {
   border: 1px solid rgba(23, 32, 42, 0.16);
