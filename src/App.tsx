@@ -26,8 +26,13 @@ import {
   gridCellMercator,
   maxCoverageGridPx,
   minCoverageGridPx,
+  sampleHeightField,
 } from "./analysis/coverageGrid";
-import { analysisMercatorBounds } from "./analysis/demTiles";
+import { analysisMercatorBounds, chooseDemZoom } from "./analysis/demTiles";
+import {
+  TerrainHeightTileLoader,
+  type TerrainHeightField,
+} from "./analysis/terrainTiles";
 import {
   BuildingHeightTileLoader,
   sampleBuildingHeightField,
@@ -104,6 +109,11 @@ let coverageSourceCanvas: HTMLCanvasElement | null = null;
 type CachedBuildingField = {
   signature: string;
   field: BuildingHeightField;
+};
+
+type CachedTerrainField = {
+  signature: string;
+  field: TerrainHeightField;
 };
 
 function profileLabel(id: LinkProfileId): string {
@@ -512,6 +522,8 @@ export function App() {
   const coverageDisplayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const coverageRenderSeqRef = useRef(0);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
+  const terrainTileLoaderRef = useRef<TerrainHeightTileLoader | null>(null);
+  const terrainFieldRef = useRef<CachedTerrainField | null>(null);
   const buildingTileLoaderRef = useRef<BuildingHeightTileLoader | null>(null);
   const buildingFieldRef = useRef<CachedBuildingField | null>(null);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
@@ -678,11 +690,50 @@ export function App() {
     ].join(":");
   }
 
-  function fixedBuildingSampler(map: mapboxgl.Map, field: BuildingHeightField): TerrainSampler {
+  function terrainFieldSignature(request: AnalysisRequest, mode: DebugMode): string {
+    const radiusM = analysisRadiusM(request, mode);
+    const bounds = analysisMercatorBounds(request, radiusM);
+    const zoom = chooseDemZoom(request, radiusM);
+    return [
+      zoom,
+      gpuHeightTexturePx,
+      bounds.west.toFixed(8),
+      bounds.north.toFixed(8),
+      bounds.east.toFixed(8),
+      bounds.south.toFixed(8),
+    ].join(":");
+  }
+
+  function fixedOcclusionSampler(
+    terrainField: TerrainHeightField,
+    buildingField: BuildingHeightField | null,
+  ): TerrainSampler {
     return {
-      queryTerrainElevation: (lngLat, options) => map.queryTerrainElevation(lngLat, options),
-      queryBuildingHeightM: (lngLat) => sampleBuildingHeightField(field, lngLatToMercator01(lngLat.lng, lngLat.lat)),
+      queryTerrainElevation: (lngLat) => sampleHeightField(terrainField, lngLatToMercator01(lngLat.lng, lngLat.lat)),
+      queryBuildingHeightM: buildingField
+        ? (lngLat) => sampleBuildingHeightField(buildingField, lngLatToMercator01(lngLat.lng, lngLat.lat))
+        : undefined,
     };
+  }
+
+  async function terrainFieldForAnalysis(request: AnalysisRequest, mode: DebugMode): Promise<TerrainHeightField | null> {
+    if (!token) {
+      terrainFieldRef.current = null;
+      return null;
+    }
+    if (!terrainTileLoaderRef.current) {
+      terrainTileLoaderRef.current = new TerrainHeightTileLoader(token);
+    }
+    const signature = terrainFieldSignature(request, mode);
+    if (terrainFieldRef.current?.signature !== signature) {
+      const radiusM = analysisRadiusM(request, mode);
+      const bounds = analysisMercatorBounds(request, radiusM);
+      terrainFieldRef.current = {
+        signature,
+        field: await terrainTileLoaderRef.current.buildHeightField(bounds, chooseDemZoom(request, radiusM), gpuHeightTexturePx),
+      };
+    }
+    return terrainFieldRef.current.field;
   }
 
   async function terrainSamplerForAnalysis(
@@ -692,6 +743,10 @@ export function App() {
   ): Promise<TerrainSampler> {
     if (!request.includeBuildings || !token) {
       buildingFieldRef.current = null;
+      return mapTerrainSampler(map);
+    }
+    const terrainField = await terrainFieldForAnalysis(request, mode);
+    if (!terrainField) {
       return mapTerrainSampler(map);
     }
     if (!buildingTileLoaderRef.current) {
@@ -707,7 +762,7 @@ export function App() {
         field: await buildingTileLoaderRef.current.buildHeightField(bounds, gridSize, gridSize),
       };
     }
-    return fixedBuildingSampler(map, buildingFieldRef.current.field);
+    return fixedOcclusionSampler(terrainField, buildingFieldRef.current.field);
   }
 
   function currentTerrainSampler(map: mapboxgl.Map, request: AnalysisRequest, mode: DebugMode): TerrainSampler {
@@ -715,8 +770,9 @@ export function App() {
       return mapTerrainSampler(map);
     }
     const signature = buildingFieldSignature(request, mode);
-    return buildingFieldRef.current?.signature === signature
-      ? fixedBuildingSampler(map, buildingFieldRef.current.field)
+    const terrainSignature = terrainFieldSignature(request, mode);
+    return buildingFieldRef.current?.signature === signature && terrainFieldRef.current?.signature === terrainSignature
+      ? fixedOcclusionSampler(terrainFieldRef.current.field, buildingFieldRef.current.field)
       : mapTerrainSampler(map);
   }
 

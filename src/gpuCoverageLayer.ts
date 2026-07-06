@@ -10,6 +10,8 @@ import {
   clampGridSize,
   coverageRaySteps,
   createCoverageGridSpec,
+  gridCellMercator,
+  sampleHeightField,
   solveHeightFieldGrid,
   type HeightField,
 } from "./analysis/coverageGrid";
@@ -424,7 +426,7 @@ export class GpuCoverageLayer {
   }
 
   private renderHeightMap(engine: CoverageOverlay["engine"] = "gpu"): CoverageOverlay | null {
-    if (!this.analysis || !this.heightData) {
+    if (!this.analysis || !this.bounds || !this.heightData) {
       return null;
     }
     const startedAt = performance.now();
@@ -436,6 +438,13 @@ export class GpuCoverageLayer {
     }
     context.imageSmoothingEnabled = false;
     const imageData = context.createImageData(this.canvas.width, this.canvas.height);
+    const spec = createCoverageGridSpec(this.analysis, this.debugMode);
+    const field: HeightField = {
+      width: this.options.texturePx,
+      height: this.options.texturePx,
+      bounds: this.bounds,
+      elevations: this.heightData,
+    };
     let minHeightM = Infinity;
     let maxHeightM = -Infinity;
     for (let y = 0; y < this.canvas.height; y++) {
@@ -445,9 +454,7 @@ export class GpuCoverageLayer {
         if (dx * dx + dy * dy > 1) {
           continue;
         }
-        const sourceX = Math.max(0, Math.min(this.options.texturePx - 1, Math.floor((x / this.canvas.width) * this.options.texturePx)));
-        const sourceY = Math.max(0, Math.min(this.options.texturePx - 1, Math.floor((y / this.canvas.height) * this.options.texturePx)));
-        const heightM = this.heightData[sourceY * this.options.texturePx + sourceX] ?? 0;
+        const heightM = sampleHeightField(field, gridCellMercator(spec, x, y));
         minHeightM = Math.min(minHeightM, heightM);
         maxHeightM = Math.max(maxHeightM, heightM);
       }
@@ -459,9 +466,7 @@ export class GpuCoverageLayer {
         if (dx * dx + dy * dy > 1) {
           continue;
         }
-        const sourceX = Math.max(0, Math.min(this.options.texturePx - 1, Math.floor((x / this.canvas.width) * this.options.texturePx)));
-        const sourceY = Math.max(0, Math.min(this.options.texturePx - 1, Math.floor((y / this.canvas.height) * this.options.texturePx)));
-        const heightM = this.heightData[sourceY * this.options.texturePx + sourceX] ?? 0;
+        const heightM = sampleHeightField(field, gridCellMercator(spec, x, y));
         const [r, g, b, a] = shadeHeightMap(heightM, minHeightM, maxHeightM);
         const offset = (y * this.canvas.width + x) * 4;
         imageData.data[offset] = r;
