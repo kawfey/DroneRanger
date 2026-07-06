@@ -17,6 +17,14 @@ import {
   type TerrainSampler,
 } from "./analysis/singleRay";
 import {
+  clampGridSize,
+  createCoverageGridSpec,
+  gridCellMercator,
+  maxCoverageGridPx,
+  minCoverageGridPx,
+} from "./analysis/coverageGrid";
+import { shadeForPixel } from "./analysis/coverageShading";
+import {
   lngLatToMercator01,
   mercator01ToLngLat,
   metersToMercatorUnits,
@@ -73,14 +81,12 @@ type InspectorTarget = {
 };
 
 type CoverageImage = {
-  url: string;
+  canvas: HTMLCanvasElement;
   coordinates: [[number, number], [number, number], [number, number], [number, number]];
 };
 
-const minCoverageGridPx = 25;
-const maxCoverageGridPx = 384;
 const coverageTexturePx = 768;
-const enableGpuCoverage = true;
+const enableGpuCoverage = false;
 
 function profileLabel(id: LinkProfileId): string {
   return id[0].toUpperCase() + id.slice(1);
@@ -168,78 +174,48 @@ function coverageImageCoordinates(
   ];
 }
 
-function shadeForPixel(pixel: CoveragePixel, analysis: AnalysisRequest): [number, number, number, number] {
-  if (!pixel.reachable) {
-    return [0, 0, 0, 0];
-  }
-  const span = Math.max(0.001, analysis.altitude.maxM - analysis.altitude.minM);
-  const altitudeStepM = Math.max(0.001, Math.abs(analysis.altitude.stepM));
-  const steppedAltitudeM =
-    analysis.altitude.minM +
-    Math.ceil((pixel.requiredAltitudeM - analysis.altitude.minM) / altitudeStepM) * altitudeStepM;
-  const t = Math.max(0, Math.min(1, (steppedAltitudeM - analysis.altitude.minM) / span));
-  const stops: Array<{ t: number; color: [number, number, number] }> = [
-    { t: 0, color: [31, 184, 88] },
-    { t: 0.5, color: [247, 220, 72] },
-    { t: 0.75, color: [242, 143, 44] },
-    { t: 1, color: [220, 54, 46] },
-  ];
-  const upper = stops.find((stop) => stop.t >= t) ?? stops[stops.length - 1];
-  const lower = stops[Math.max(0, stops.indexOf(upper) - 1)];
-  const localT = upper.t === lower.t ? 0 : (t - lower.t) / (upper.t - lower.t);
-  const r = Math.round(lower.color[0] + (upper.color[0] - lower.color[0]) * localT);
-  const g = Math.round(lower.color[1] + (upper.color[1] - lower.color[1]) * localT);
-  const b = Math.round(lower.color[2] + (upper.color[2] - lower.color[2]) * localT);
-  return [r, g, b, 178];
-}
-
 function renderCoverageImage(
   map: TerrainSampler | null,
   analysis: AnalysisRequest,
   debugMode: DebugMode,
 ): CoverageImage {
   const radiusM = analysisRadiusM(analysis, debugMode);
-  const gridSize = Math.max(minCoverageGridPx, Math.min(maxCoverageGridPx, Math.round(analysis.gridSizePx)));
-  const center = lngLatToMercator01(analysis.operator.lng, analysis.operator.lat);
-  const radius = metersToMercatorUnits(radiusM, analysis.operator.lat);
+  const spec = createCoverageGridSpec(analysis, debugMode);
+  const gridSize = clampGridSize(analysis.gridSizePx);
   const canvas = document.createElement("canvas");
-  canvas.width = coverageTexturePx;
-  canvas.height = coverageTexturePx;
+  canvas.width = gridSize;
+  canvas.height = gridSize;
   const context = canvas.getContext("2d");
   if (!context) {
-    return { url: "", coordinates: coverageImageCoordinates(analysis.operator, radiusM) };
+    return { canvas, coordinates: coverageImageCoordinates(analysis.operator, radiusM) };
   }
   context.imageSmoothingEnabled = false;
-  context.clearRect(0, 0, coverageTexturePx, coverageTexturePx);
+  const imageData = context.createImageData(gridSize, gridSize);
 
   for (let y = 0; y < gridSize; y++) {
-    const y0 = Math.floor((y / gridSize) * coverageTexturePx);
-    const y1 = Math.floor(((y + 1) / gridSize) * coverageTexturePx);
     for (let x = 0; x < gridSize; x++) {
-      const nx = (x + 0.5) / gridSize;
-      const ny = (y + 0.5) / gridSize;
-      const dx = nx * 2 - 1;
-      const dy = ny * 2 - 1;
+      const mercator = gridCellMercator(spec, x, y);
+      const dx = ((x + 0.5) / gridSize) * 2 - 1;
+      const dy = ((y + 0.5) / gridSize) * 2 - 1;
       if (dx * dx + dy * dy > 1) {
         continue;
       }
-      const target = mercator01ToLngLat({
-        x: center.x + dx * radius,
-        y: center.y + dy * radius,
-      });
+      const target = mercator01ToLngLat(mercator);
       const pixel = map
         ? inspectTerrainPixel(map, analysis, target, debugMode)
         : inspectFlatEarthPixel(analysis, target, debugMode);
       const [r, g, b, a] = shadeForPixel(pixel, analysis);
-      const x0 = Math.floor((x / gridSize) * coverageTexturePx);
-      const x1 = Math.floor(((x + 1) / gridSize) * coverageTexturePx);
-      context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
-      context.fillRect(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0));
+      const offset = (y * gridSize + x) * 4;
+      imageData.data[offset] = r;
+      imageData.data[offset + 1] = g;
+      imageData.data[offset + 2] = b;
+      imageData.data[offset + 3] = a;
     }
   }
+  context.putImageData(imageData, 0, 0);
 
   return {
-    url: canvas.toDataURL("image/png"),
+    canvas,
     coordinates: coverageImageCoordinates(analysis.operator, radiusM),
   };
 }
@@ -248,39 +224,36 @@ function applyCoverageImageLayer(
   map: mapboxgl.Map,
   image: CoverageImage | GpuCoverageImage,
 ): void {
-  const source = map.getSource("los-coverage") as
-    | (mapboxgl.ImageSource & {
-        updateImage?: (image: { url: string; coordinates: CoverageImage["coordinates"] }) => void;
-      })
-    | undefined;
-
-  if (!source) {
-    map.addSource("los-coverage", {
-      type: "image",
-      url: image.url,
-      coordinates: image.coordinates,
-    });
-  } else {
-    source.updateImage?.(image);
+  if (map.getLayer("los-coverage")) {
+    map.removeLayer("los-coverage");
+  }
+  if (map.getSource("los-coverage")) {
+    map.removeSource("los-coverage");
   }
 
-  if (!map.getLayer("los-coverage")) {
-    map.addLayer(
-      {
-        id: "los-coverage",
-        type: "raster",
-        source: "los-coverage",
-        paint: {
-          "raster-opacity": 0.86,
-          "raster-fade-duration": 0,
-          "raster-resampling": "nearest",
-        },
+  map.addSource("los-coverage", {
+    type: "canvas",
+    canvas: image.canvas,
+    coordinates: image.coordinates,
+    animate: false,
+  });
+
+  map.addLayer(
+    {
+      id: "los-coverage",
+      type: "raster",
+      source: "los-coverage",
+      paint: {
+        "raster-opacity": 0.86,
+        "raster-fade-duration": 0,
+        "raster-resampling": "nearest",
       },
-      map.getLayer("reference-radius-line") ? "reference-radius-line" : undefined,
-    );
-  }
+    },
+    map.getLayer("reference-radius-line") ? "reference-radius-line" : undefined,
+  );
   map.setPaintProperty("los-coverage", "raster-resampling", "nearest");
   map.setPaintProperty("los-coverage", "raster-fade-duration", 0);
+  map.triggerRepaint();
 }
 
 function updateCoverageLayer(
