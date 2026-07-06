@@ -163,24 +163,11 @@ type CoverageFootprintAudit = {
   layerPaint: Record<string, unknown> | null;
 };
 
-type RenderedCoverageFootprint = {
-  width: number;
-  height: number;
-  changedPixels: number;
-  bounds: PixelBounds | null;
-  center: { x: number; y: number } | null;
-  radiusX: number | null;
-  radiusY: number | null;
-  sampleCount: number;
-  maxDelta: number;
-};
-
 declare global {
   interface Window {
     __droneRangeDebug?: DroneRangeDebugState;
     __inspectCoverageAt?: (lng: number, lat: number) => CoverageInspection;
     __auditCoverageFootprint?: () => CoverageFootprintAudit;
-    __measureRenderedCoverageFootprint?: () => Promise<RenderedCoverageFootprint>;
   }
 }
 
@@ -492,106 +479,6 @@ function getCoverageLayerPaint(map: mapboxgl.Map): Record<string, unknown> | nul
   };
 }
 
-function waitForAnimationFrames(count: number): Promise<void> {
-  return new Promise((resolve) => {
-    const tick = (remaining: number) => {
-      if (remaining <= 0) {
-        resolve();
-        return;
-      }
-      requestAnimationFrame(() => tick(remaining - 1));
-    };
-    tick(count);
-  });
-}
-
-async function mapCanvasImageData(map: mapboxgl.Map): Promise<ImageData> {
-  const canvas = map.getCanvas();
-  const image = new Image();
-  image.src = canvas.toDataURL("image/png");
-  await image.decode();
-  const copy = document.createElement("canvas");
-  copy.width = canvas.width;
-  copy.height = canvas.height;
-  const context = copy.getContext("2d", { willReadFrequently: true });
-  if (!context) {
-    throw new Error("Unable to read Mapbox canvas copy");
-  }
-  context.drawImage(image, 0, 0);
-  return context.getImageData(0, 0, copy.width, copy.height);
-}
-
-function diffImageFootprint(visible: ImageData, hidden: ImageData): RenderedCoverageFootprint {
-  let minX = visible.width;
-  let minY = visible.height;
-  let maxX = -1;
-  let maxY = -1;
-  let changedPixels = 0;
-  let maxDelta = 0;
-  const threshold = 18;
-
-  for (let y = 0; y < visible.height; y++) {
-    for (let x = 0; x < visible.width; x++) {
-      const offset = (y * visible.width + x) * 4;
-      const delta =
-        Math.abs((visible.data[offset] ?? 0) - (hidden.data[offset] ?? 0)) +
-        Math.abs((visible.data[offset + 1] ?? 0) - (hidden.data[offset + 1] ?? 0)) +
-        Math.abs((visible.data[offset + 2] ?? 0) - (hidden.data[offset + 2] ?? 0));
-      maxDelta = Math.max(maxDelta, delta);
-      if (delta <= threshold) {
-        continue;
-      }
-      changedPixels++;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-  }
-
-  const bounds = maxX >= 0 ? { minX, minY, maxX, maxY } : null;
-  return {
-    width: visible.width,
-    height: visible.height,
-    changedPixels,
-    bounds,
-    center: bounds ? { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 } : null,
-    radiusX: bounds ? (bounds.maxX - bounds.minX + 1) / 2 : null,
-    radiusY: bounds ? (bounds.maxY - bounds.minY + 1) / 2 : null,
-    sampleCount: visible.width * visible.height,
-    maxDelta,
-  };
-}
-
-async function measureRenderedCoverageFootprint(map: mapboxgl.Map | null): Promise<RenderedCoverageFootprint> {
-  if (!map || !map.getLayer("los-coverage")) {
-    return {
-      width: 0,
-      height: 0,
-      changedPixels: 0,
-      bounds: null,
-      center: null,
-      radiusX: null,
-      radiusY: null,
-      sampleCount: 0,
-      maxDelta: 0,
-    };
-  }
-
-  const opacity = map.getPaintProperty("los-coverage", "raster-opacity");
-  map.triggerRepaint();
-  await waitForAnimationFrames(3);
-  const visible = await mapCanvasImageData(map);
-  map.setPaintProperty("los-coverage", "raster-opacity", 0);
-  map.triggerRepaint();
-  await waitForAnimationFrames(3);
-  const hidden = await mapCanvasImageData(map);
-  map.setPaintProperty("los-coverage", "raster-opacity", opacity ?? 0.86);
-  map.triggerRepaint();
-  await waitForAnimationFrames(3);
-  return diffImageFootprint(visible, hidden);
-}
-
 function auditCoverageFootprint(
   map: mapboxgl.Map | null,
   canvas: HTMLCanvasElement | null,
@@ -688,14 +575,13 @@ function inspectCoverageCanvasAt(
 function ensureCoverageCanvasSource(
   map: mapboxgl.Map,
   overlay: CoverageOverlay | GpuCoverageImage,
-  options: { recreate?: boolean } = {},
 ): void {
   const existingSource = map.getSource("los-coverage") as
     | (mapboxgl.CanvasSource & { type?: string; setCoordinates?: (coordinates: CoverageCoordinates) => void })
     | undefined;
   const isCanvasSource = !existingSource || existingSource.type === "canvas" || typeof existingSource.setCoordinates === "function";
 
-  if (existingSource && (options.recreate || !isCanvasSource)) {
+  if (existingSource && !isCanvasSource) {
     if (map.getLayer("los-coverage")) {
       map.removeLayer("los-coverage");
     }
@@ -748,7 +634,7 @@ function updateCoverageLayer(
   debugMode: DebugMode,
   displayCanvas: HTMLCanvasElement,
 ): void {
-  ensureCoverageCanvasSource(map, renderCoverageImage(map, analysis, debugMode, displayCanvas), { recreate: true });
+  ensureCoverageCanvasSource(map, renderCoverageImage(map, analysis, debugMode, displayCanvas));
 }
 
 function stylePreviewUrl(style: MapStyleTemplate): string {
@@ -893,7 +779,6 @@ export function App() {
         window.__droneRangeDebug?.engine ?? coverageEngine,
         window.__droneRangeDebug?.preferredEngine ?? preferredCoverageEngine,
       );
-    window.__measureRenderedCoverageFootprint = () => measureRenderedCoverageFootprint(map);
   }
 
   function getCoverageDisplayCanvas(): HTMLCanvasElement {
@@ -926,7 +811,6 @@ export function App() {
         ...overlay,
         canvas: displayCanvas,
       },
-      { recreate: true },
     );
     updateDebugState({
       coverageCoordinates: overlay.coordinates,
@@ -1103,7 +987,6 @@ export function App() {
         delete window.__droneRangeDebug;
         delete window.__inspectCoverageAt;
         delete window.__auditCoverageFootprint;
-        delete window.__measureRenderedCoverageFootprint;
       }
     };
   }, [hasToken]);
