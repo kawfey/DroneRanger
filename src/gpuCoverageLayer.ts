@@ -25,8 +25,6 @@ import type {
   LinkProfile,
 } from "./types";
 
-export type GpuCoverageImage = CoverageOverlay;
-
 export type GpuCoverageLayerOptions = {
   mapboxToken: string;
   texturePx: number;
@@ -242,7 +240,7 @@ export class GpuCoverageLayer {
     this.uploadHeightTexture(elevations);
   }
 
-  render(): GpuCoverageImage | null {
+  render(): CoverageOverlay | null {
     if (!this.analysis || !this.bounds || !this.heightData) {
       return null;
     }

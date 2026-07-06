@@ -29,7 +29,7 @@ import {
   mercator01ToLngLat,
   metersToMercatorUnits,
 } from "./analysis/coordinates";
-import { GpuCoverageLayer, type GpuCoverageDebugStats, type GpuCoverageImage } from "./gpuCoverageLayer";
+import { GpuCoverageLayer, type GpuCoverageDebugStats } from "./gpuCoverageLayer";
 import type {
   AnalysisRequest,
   CoverageEngine,
@@ -574,7 +574,7 @@ function inspectCoverageCanvasAt(
 
 function ensureCoverageCanvasSource(
   map: mapboxgl.Map,
-  overlay: CoverageOverlay | GpuCoverageImage,
+  overlay: CoverageOverlay,
 ): void {
   const existingSource = map.getSource("los-coverage") as
     | (mapboxgl.CanvasSource & { type?: string; setCoordinates?: (coordinates: CoverageCoordinates) => void })
@@ -792,7 +792,7 @@ export function App() {
     return coverageDisplayCanvasRef.current;
   }
 
-  function applyCoverageOverlay(map: mapboxgl.Map, overlay: CoverageOverlay | GpuCoverageImage): void {
+  function applyCoverageOverlay(map: mapboxgl.Map, overlay: CoverageOverlay): void {
     const displayCanvas = getCoverageDisplayCanvas();
     if (displayCanvas !== overlay.canvas) {
       displayCanvas.width = overlay.gridSizePx;
