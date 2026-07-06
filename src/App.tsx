@@ -250,16 +250,11 @@ function ensureCoverageCanvasSource(
       type: "canvas",
       canvas: overlay.canvas,
       coordinates: overlay.coordinates,
-      animate: true,
+      animate: false,
     });
   } else if (typeof canvasSource.setCoordinates === "function") {
     canvasSource.setCoordinates(overlay.coordinates);
   }
-
-  const refreshedSource = map.getSource("los-coverage") as
-    | (mapboxgl.CanvasSource & { play?: () => void })
-    | undefined;
-  refreshedSource?.play?.();
 
   if (!map.getLayer("los-coverage")) {
     map.addLayer(
@@ -304,7 +299,7 @@ function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisRequest, deb
       maxzoom: 14,
     });
   }
-  map.setTerrain({ source: "mapbox-dem", exaggeration: 1 });
+  map.setTerrain(null);
 
   if (map.getSource("composite") && !map.getLayer("los-building-reference")) {
     map.addLayer({
@@ -558,8 +553,8 @@ export function App() {
       zoom: 13.5,
       pitch: 0,
       bearing: 0,
-      antialias: true,
-      preserveDrawingBuffer: true,
+      antialias: false,
+      preserveDrawingBuffer: false,
     });
     map.dragRotate.disable();
     map.touchZoomRotate.disableRotation();
