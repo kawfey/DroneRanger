@@ -206,7 +206,7 @@ export function renderCoverageImage(
       const pixel = map
         ? inspectTerrainPixel(map, analysis, target, debugMode)
         : inspectFlatEarthPixel(analysis, target, debugMode);
-      const [r, g, b, a] = shadeForPixel(pixel, analysis);
+      const [r, g, b, a] = shadeForPixel(pixel, analysis, debugMode);
       const offset = (y * gridSize + x) * 4;
       imageData.data[offset] = r;
       imageData.data[offset + 1] = g;
@@ -440,6 +440,7 @@ export function App() {
     if (!coverageDisplayCanvasRef.current) {
       const canvas = document.createElement("canvas");
       canvas.style.display = "none";
+      canvas.style.imageRendering = "pixelated";
       canvas.dataset.coverageSource = "los-coverage";
       document.body.appendChild(canvas);
       coverageDisplayCanvasRef.current = canvas;
@@ -452,6 +453,7 @@ export function App() {
     if (displayCanvas !== overlay.canvas) {
       displayCanvas.width = overlay.gridSizePx;
       displayCanvas.height = overlay.gridSizePx;
+      displayCanvas.style.imageRendering = "pixelated";
       const context = displayCanvas.getContext("2d");
       if (context) {
         context.imageSmoothingEnabled = false;

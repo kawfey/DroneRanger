@@ -259,7 +259,7 @@ export class GpuCoverageLayer {
     if (!data) {
       return null;
     }
-    return plotCoverageGridData(data, this.analysis, this.gpuCanvas);
+    return plotCoverageGridData(data, this.analysis, this.gpuCanvas, this.debugMode);
   }
 
   renderCpuReference(): CoverageOverlay | null {
@@ -267,7 +267,7 @@ export class GpuCoverageLayer {
     if (!data || !this.analysis) {
       return null;
     }
-    return plotCoverageGridData(data, this.analysis, this.cpuCanvas);
+    return plotCoverageGridData(data, this.analysis, this.cpuCanvas, this.debugMode);
   }
 
   solveCpuReferenceData(): CoverageGridData | null {

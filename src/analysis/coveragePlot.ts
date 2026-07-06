@@ -1,10 +1,11 @@
-import { shadeRequiredAltitude } from "./coverageShading";
-import type { AnalysisRequest, CoverageGridData, CoverageOverlay } from "../types";
+import { shadeLosReachability, shadeRequiredAltitude } from "./coverageShading";
+import type { AnalysisRequest, CoverageGridData, CoverageOverlay, DebugMode } from "../types";
 
 export function plotCoverageGridData(
   data: CoverageGridData,
   analysis: AnalysisRequest,
   canvas: HTMLCanvasElement,
+  debugMode: DebugMode,
 ): CoverageOverlay {
   canvas.width = data.gridSizePx;
   canvas.height = data.gridSizePx;
@@ -13,10 +14,21 @@ export function plotCoverageGridData(
     context.imageSmoothingEnabled = false;
     const imageData = context.createImageData(data.gridSizePx, data.gridSizePx);
     for (let index = 0; index < data.reachable.length; index++) {
-      if (!data.reachable[index]) {
+      const x = index % data.gridSizePx;
+      const y = Math.floor(index / data.gridSizePx);
+      const dx = ((x + 0.5) / data.gridSizePx) * 2 - 1;
+      const dy = ((y + 0.5) / data.gridSizePx) * 2 - 1;
+      if (dx * dx + dy * dy > 1) {
         continue;
       }
-      const [r, g, b, a] = shadeRequiredAltitude(data.requiredAltitudeM[index] ?? 0, analysis);
+      const reachable = Boolean(data.reachable[index]);
+      if (!reachable && debugMode !== "los") {
+        continue;
+      }
+      const [r, g, b, a] =
+        debugMode === "los"
+          ? shadeLosReachability(reachable)
+          : shadeRequiredAltitude(data.requiredAltitudeM[index] ?? 0, analysis);
       const offset = index * 4;
       imageData.data[offset] = r;
       imageData.data[offset + 1] = g;

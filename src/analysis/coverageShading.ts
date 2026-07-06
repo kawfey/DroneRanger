@@ -1,10 +1,21 @@
-import type { AnalysisRequest, CoveragePixel } from "../types";
+import type { AnalysisRequest, CoveragePixel, DebugMode } from "../types";
 
-export function shadeForPixel(pixel: CoveragePixel, analysis: AnalysisRequest): [number, number, number, number] {
+export function shadeForPixel(
+  pixel: CoveragePixel,
+  analysis: AnalysisRequest,
+  debugMode: DebugMode,
+): [number, number, number, number] {
+  if (debugMode === "los") {
+    return shadeLosReachability(pixel.reachable);
+  }
   if (!pixel.reachable) {
     return [0, 0, 0, 0];
   }
   return shadeRequiredAltitude(pixel.requiredAltitudeM, analysis);
+}
+
+export function shadeLosReachability(reachable: boolean): [number, number, number, number] {
+  return reachable ? [28, 132, 255, 178] : [255, 255, 255, 150];
 }
 
 export function shadeRequiredAltitude(
