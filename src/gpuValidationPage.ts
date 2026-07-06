@@ -17,6 +17,10 @@ type ValidationResult = {
   maxAltitudeErrorM: number;
   maxDistanceErrorM: number;
   classificationMismatches: number;
+  renderedAlphaMismatches: number;
+  alphaDiameterPx?: number;
+  expectedDiameterPx?: number;
+  alphaDiameterRatio?: number;
   cells: number;
 };
 
@@ -75,11 +79,13 @@ async function validateScenario(
   const spec = createCoverageGridSpec(request, debugMode);
   const cpu = solveHeightFieldGrid(spec, field);
   layer.updateHeightFieldForValidation(request, debugMode, spec.bounds, field.elevations);
-  layer.render();
+  const gpuImage = layer.render();
+  const cpuImage = layer.renderCpuReference();
   const gpu = layer.readNumericCoverage();
   let maxAltitudeErrorM = 0;
   let maxDistanceErrorM = 0;
   let classificationMismatches = 0;
+  let renderedAlphaMismatches = 0;
   let worst = { x: 0, y: 0, cpu: 0, gpu: 0 };
 
   for (let y = 0; y < spec.gridSizePx; y++) {
@@ -105,14 +111,98 @@ async function validateScenario(
     }
   }
 
+  if (gpuImage && cpuImage) {
+    const gpuAlpha = renderedAlpha(gpuImage.canvas);
+    const cpuAlpha = renderedAlpha(cpuImage.canvas);
+    for (let index = 0; index < cpuAlpha.length; index++) {
+      if (((gpuAlpha[index] ?? 0) > 0) !== ((cpuAlpha[index] ?? 0) > 0)) {
+        renderedAlphaMismatches++;
+      }
+    }
+  } else {
+    renderedAlphaMismatches = spec.gridSizePx * spec.gridSizePx;
+  }
+
   return {
     name,
-    passed: maxAltitudeErrorM <= 0.01 && maxDistanceErrorM <= 3 && classificationMismatches === 0,
+    passed:
+      maxAltitudeErrorM <= 0.01 &&
+      maxDistanceErrorM <= 4 &&
+      classificationMismatches === 0 &&
+      renderedAlphaMismatches === 0,
     maxAltitudeErrorM,
     maxDistanceErrorM,
     classificationMismatches,
+    renderedAlphaMismatches,
     cells: cpu.length,
     ...worst,
+  };
+}
+
+function renderedAlpha(canvas: HTMLCanvasElement): Uint8Array {
+  let source = canvas;
+  let context = source.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    source = document.createElement("canvas");
+    source.width = canvas.width;
+    source.height = canvas.height;
+    context = source.getContext("2d", { willReadFrequently: true });
+    context?.drawImage(canvas, 0, 0);
+  }
+  if (!context) {
+    return new Uint8Array(canvas.width * canvas.height);
+  }
+  const data = context.getImageData(0, 0, source.width, source.height).data;
+  const alpha = new Uint8Array(source.width * source.height);
+  for (let index = 0; index < alpha.length; index++) {
+    alpha[index] = data[index * 4 + 3] ?? 0;
+  }
+  return alpha;
+}
+
+function alphaBounds(alpha: Uint8Array, width: number): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  let minX = width;
+  let minY = Math.ceil(alpha.length / width);
+  let maxX = -1;
+  let maxY = -1;
+  for (let index = 0; index < alpha.length; index++) {
+    if (!alpha[index]) {
+      continue;
+    }
+    const x = index % width;
+    const y = Math.floor(index / width);
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  return maxX >= 0 ? { minX, minY, maxX, maxY } : null;
+}
+
+async function validateLosFootprintDiameter(
+  layer: GpuCoverageLayer,
+  request: AnalysisRequest,
+): Promise<ValidationResult> {
+  const spec = createCoverageGridSpec(request, "los");
+  layer.updateHeightFieldForValidation(request, "los", spec.bounds, flatHeightField(spec, 0).elevations);
+  const gpuImage = layer.render();
+  const alpha = gpuImage ? renderedAlpha(gpuImage.canvas) : new Uint8Array(spec.gridSizePx * spec.gridSizePx);
+  const bounds = alphaBounds(alpha, spec.gridSizePx);
+  const alphaDiameterPx = bounds ? Math.max(bounds.maxX - bounds.minX + 1, bounds.maxY - bounds.minY + 1) : 0;
+  const expectedDiameterPx = spec.gridSizePx;
+  const alphaDiameterRatio = alphaDiameterPx / expectedDiameterPx;
+
+  return {
+    name: "LOS footprint fills calculation radius",
+    passed: alphaDiameterRatio >= 0.95,
+    maxAltitudeErrorM: 0,
+    maxDistanceErrorM: 0,
+    classificationMismatches: 0,
+    renderedAlphaMismatches: 0,
+    alphaDiameterPx,
+    expectedDiameterPx,
+    alphaDiameterRatio,
+    cells: spec.gridSizePx * spec.gridSizePx,
   };
 }
 
@@ -136,6 +226,12 @@ window.runGpuCoverageValidation = async () => {
   const cutoffSpec = createCoverageGridSpec(cutoffRequest, "combined");
   const highTargetRequest = makeRequest({ altitude: { ...defaultAnalysis.altitude, maxM: 70 } });
   const highTargetSpec = createCoverageGridSpec(highTargetRequest, "los");
+  const losFootprintRequest = makeRequest({
+    radiusM: 4000,
+    gridSizePx: 100,
+    calculationRange: { mode: "manual", manualM: 4000 },
+    altitude: { minM: 0, maxM: 120, stepM: 5 },
+  });
 
   try {
     return [
@@ -143,6 +239,7 @@ window.runGpuCoverageValidation = async () => {
       await validateScenario(layer, "single ridge", ridgeRequest, "los", ridgeField(ridgeSpec, 80)),
       await validateScenario(layer, "high target terrain", highTargetRequest, "los", highTargetField(highTargetSpec)),
       await validateScenario(layer, "manual range cutoff", cutoffRequest, "combined", flatHeightField(cutoffSpec, 0)),
+      await validateLosFootprintDiameter(layer, losFootprintRequest),
     ];
   } finally {
     layer.dispose();

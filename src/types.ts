@@ -64,6 +64,15 @@ export type CoverageOverlay = {
   renderedOperator: AnalysisRequest["operator"];
 };
 
+export type CoverageGridData = {
+  coordinates: CoverageCoordinates;
+  gridSizePx: number;
+  engine: CoverageEngine;
+  renderedOperator: AnalysisRequest["operator"];
+  requiredAltitudeM: Float32Array;
+  reachable: Uint8Array;
+};
+
 export type CoveragePixel = {
   requiredAltitudeM: number;
   requiredElevationChangeM: number;

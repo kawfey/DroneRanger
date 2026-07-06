@@ -13,10 +13,18 @@ import {
   solveHeightFieldGrid,
   type HeightField,
 } from "./analysis/coverageGrid";
-import { shadeForPixel } from "./analysis/coverageShading";
+import { plotCoverageGridData } from "./analysis/coveragePlot";
 import { analysisRadiusM } from "./analysis/singleRay";
 import { combinedMaxFreeSpaceRangeM, maxFreeSpaceRangeM } from "./analysis/rf";
-import type { AnalysisRequest, CoverageCoordinates, CoverageOverlay, CoveragePixel, DebugMode, LinkProfile } from "./types";
+import type {
+  AnalysisRequest,
+  CoverageCoordinates,
+  CoverageGridData,
+  CoverageOverlay,
+  CoveragePixel,
+  DebugMode,
+  LinkProfile,
+} from "./types";
 
 export type GpuCoverageImage = CoverageOverlay;
 
@@ -69,14 +77,9 @@ uniform float u_stepAltitudeM;
 uniform float u_radiusM;
 uniform float u_maxReachM;
 uniform int u_raySteps;
-uniform vec3 u_mercatorFrame;
-uniform vec2 u_operatorLngLat;
 
 in vec2 v_uv;
 out vec4 outData;
-
-const float PI = 3.141592653589793;
-const float EARTH_RADIUS_M = 6371008.8;
 
 float heightAt(vec2 uv) {
   vec2 clampedUv = clamp(uv, vec2(0.0), vec2(1.0));
@@ -97,24 +100,6 @@ float heightAt(vec2 uv) {
   return mix(mix(h00, h10, fracPart.x), mix(h01, h11, fracPart.x), fracPart.y);
 }
 
-vec2 mercatorUvToLngLat(vec2 uv) {
-  float lng = u_operatorLngLat.x + (uv.x - u_operatorUv.x) * u_mercatorFrame.y * 360.0;
-  float mercatorY = u_mercatorFrame.x + (uv.y - u_operatorUv.y) * u_mercatorFrame.z;
-  float y = 0.5 - mercatorY;
-  float lat = 90.0 - (360.0 * atan(exp(-y * 2.0 * PI))) / PI;
-  return vec2(lng, lat);
-}
-
-float haversineDistanceM(vec2 aLngLat, vec2 bLngLat) {
-  vec2 delta = radians(bLngLat - aLngLat);
-  float lat1 = radians(aLngLat.y);
-  float lat2 = radians(bLngLat.y);
-  float h =
-    pow(sin(delta.y * 0.5), 2.0) +
-    cos(lat1) * cos(lat2) * pow(sin(delta.x * 0.5), 2.0);
-  return 2.0 * EARTH_RADIUS_M * asin(sqrt(min(1.0, h)));
-}
-
 void main() {
   vec2 terrainUv = vec2(v_uv.x, 1.0 - v_uv.y);
   vec2 circle = terrainUv * 2.0 - 1.0;
@@ -123,7 +108,7 @@ void main() {
     return;
   }
 
-  float distanceM = haversineDistanceM(u_operatorLngLat, mercatorUvToLngLat(terrainUv));
+  float distanceM = length(circle) * u_radiusM;
   float rangePass = distanceM <= u_maxReachM ? 1.0 : 0.0;
   if (distanceM > u_maxReachM) {
     outData = vec4(u_maxAltitudeM + 1.0, 0.0, rangePass, distanceM);
@@ -149,51 +134,15 @@ void main() {
   outData = vec4(requiredAltitudeM, reachable, rangePass, distanceM);
 }`;
 
-const shadeFragmentShaderSource = `#version 300 es
-precision highp float;
-
-uniform sampler2D u_numeric;
-uniform float u_minAltitudeM;
-uniform float u_maxAltitudeM;
-uniform float u_stepAltitudeM;
-
-in vec2 v_uv;
-out vec4 outColor;
-
-vec3 ramp(float t) {
-  vec3 green = vec3(31.0, 184.0, 88.0) / 255.0;
-  vec3 yellow = vec3(247.0, 220.0, 72.0) / 255.0;
-  vec3 orange = vec3(242.0, 143.0, 44.0) / 255.0;
-  vec3 red = vec3(220.0, 54.0, 46.0) / 255.0;
-  if (t < 0.5) {
-    return mix(green, yellow, t / 0.5);
-  }
-  if (t < 0.75) {
-    return mix(yellow, orange, (t - 0.5) / 0.25);
-  }
-  return mix(orange, red, (t - 0.75) / 0.25);
-}
-
-void main() {
-  vec4 data = texture(u_numeric, v_uv);
-  if (data.y < 0.5 || data.z < 0.5) {
-    outColor = vec4(0.0);
-    return;
-  }
-  float steppedAltitudeM = u_minAltitudeM + ceil((data.x - u_minAltitudeM) / max(abs(u_stepAltitudeM), 0.001)) * max(abs(u_stepAltitudeM), 0.001);
-  float band = clamp((steppedAltitudeM - u_minAltitudeM) / max(u_maxAltitudeM - u_minAltitudeM, 0.001), 0.0, 1.0);
-  outColor = vec4(ramp(band), 178.0 / 255.0);
-}`;
-
 export class GpuCoverageLayer {
   private readonly canvas: HTMLCanvasElement;
   private readonly gl: WebGL2RenderingContext;
   private readonly numericProgram: WebGLProgram;
-  private readonly shadeProgram: WebGLProgram;
   private readonly heightTexture: WebGLTexture;
   private readonly numericTexture: WebGLTexture;
   private readonly numericFramebuffer: WebGLFramebuffer;
   private readonly cpuCanvas: HTMLCanvasElement;
+  private readonly gpuCanvas: HTMLCanvasElement;
   private readonly tileCache = new Map<string, Promise<DecodedTile>>();
   private analysis: AnalysisRequest | null = null;
   private debugMode: DebugMode = "combined";
@@ -205,7 +154,11 @@ export class GpuCoverageLayer {
 
   static create(options: GpuCoverageLayerOptions): GpuCoverageLayer | null {
     const canvas = document.createElement("canvas");
-    const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: false });
+    const gl = canvas.getContext("webgl2", {
+      alpha: true,
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: true,
+    });
     if (!gl || !gl.getExtension("EXT_color_buffer_float")) {
       return null;
     }
@@ -222,7 +175,6 @@ export class GpuCoverageLayer {
     this.canvas.width = options.texturePx;
     this.canvas.height = options.texturePx;
     this.numericProgram = createProgram(gl, vertexShaderSource, numericFragmentShaderSource);
-    this.shadeProgram = createProgram(gl, vertexShaderSource, shadeFragmentShaderSource);
     const texture = gl.createTexture();
     const numericTexture = gl.createTexture();
     const numericFramebuffer = gl.createFramebuffer();
@@ -233,6 +185,7 @@ export class GpuCoverageLayer {
     this.numericTexture = numericTexture;
     this.numericFramebuffer = numericFramebuffer;
     this.cpuCanvas = document.createElement("canvas");
+    this.gpuCanvas = document.createElement("canvas");
     this.initNumericTarget();
     this.initGeometry();
   }
@@ -300,8 +253,11 @@ export class GpuCoverageLayer {
     const radiusM = analysisRadiusM(this.analysis, this.debugMode);
     const operatorUv = createCoverageGridSpec(this.analysis, this.debugMode).operatorUv;
 
+    gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.numericFramebuffer);
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(this.numericProgram);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.heightTexture);
@@ -315,43 +271,26 @@ export class GpuCoverageLayer {
     setUniform1f(gl, this.numericProgram, "u_radiusM", radiusM);
     setUniform1f(gl, this.numericProgram, "u_maxReachM", maxReachM(this.analysis, this.debugMode, radiusM));
     setUniform1i(gl, this.numericProgram, "u_raySteps", coverageRaySteps);
-    setUniform3f(
-      gl,
-      this.numericProgram,
-      "u_mercatorFrame",
-      this.operatorMercatorY(),
-      this.bounds.east - this.bounds.west,
-      this.bounds.south - this.bounds.north,
-    );
-    setUniform2f(
-      gl,
-      this.numericProgram,
-      "u_operatorLngLat",
-      this.analysis.operator.lng,
-      this.analysis.operator.lat,
-    );
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.useProgram(this.shadeProgram);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.numericTexture);
-    setUniform1i(gl, this.shadeProgram, "u_numeric", 0);
-    setUniform1f(gl, this.shadeProgram, "u_minAltitudeM", this.analysis.altitude.minM);
-    setUniform1f(gl, this.shadeProgram, "u_maxAltitudeM", this.analysis.altitude.maxM);
-    setUniform1f(gl, this.shadeProgram, "u_stepAltitudeM", this.analysis.altitude.stepM);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.flush();
 
-    return {
-      canvas: this.canvas,
-      coordinates: this.options.coordinatesForAnalysis(this.analysis.operator, radiusM),
-      gridSizePx: this.canvas.width,
-      engine: "gpu",
-      renderedOperator: this.analysis.operator,
-    };
+    const data = this.readGpuCoverageData();
+    if (!data) {
+      return null;
+    }
+    return plotCoverageGridData(data, this.analysis, this.gpuCanvas);
   }
 
   renderCpuReference(): CoverageOverlay | null {
+    const data = this.solveCpuReferenceData();
+    if (!data || !this.analysis) {
+      return null;
+    }
+    return plotCoverageGridData(data, this.analysis, this.cpuCanvas);
+  }
+
+  solveCpuReferenceData(): CoverageGridData | null {
     if (!this.analysis || !this.bounds || !this.heightData) {
       return null;
     }
@@ -364,38 +303,22 @@ export class GpuCoverageLayer {
       elevations: this.heightData,
     };
     const pixels = solveHeightFieldGrid(spec, field);
-    this.cpuCanvas.width = spec.gridSizePx;
-    this.cpuCanvas.height = spec.gridSizePx;
-    const context = this.cpuCanvas.getContext("2d");
-    if (!context) {
-      return null;
+    const requiredAltitudeM = new Float32Array(pixels.length);
+    const reachable = new Uint8Array(pixels.length);
+    for (let index = 0; index < pixels.length; index++) {
+      const pixel = pixels[index];
+      requiredAltitudeM[index] = pixel?.requiredAltitudeM ?? 0;
+      reachable[index] = pixel?.reachable ? 1 : 0;
     }
-
-    context.imageSmoothingEnabled = false;
-    const imageData = context.createImageData(spec.gridSizePx, spec.gridSizePx);
-    for (let y = 0; y < spec.gridSizePx; y++) {
-      for (let x = 0; x < spec.gridSizePx; x++) {
-        const pixel = pixels[y * spec.gridSizePx + x];
-        if (!pixel) {
-          continue;
-        }
-        const [r, g, b, a] = shadeForPixel(pixel, this.analysis);
-        const offset = (y * spec.gridSizePx + x) * 4;
-        imageData.data[offset] = r;
-        imageData.data[offset + 1] = g;
-        imageData.data[offset + 2] = b;
-        imageData.data[offset + 3] = a;
-      }
-    }
-    context.putImageData(imageData, 0, 0);
 
     const radiusM = analysisRadiusM(this.analysis, this.debugMode);
     return {
-      canvas: this.cpuCanvas,
       coordinates: this.options.coordinatesForAnalysis(this.analysis.operator, radiusM),
       gridSizePx: spec.gridSizePx,
       engine: "cpu-fallback",
       renderedOperator: this.analysis.operator,
+      requiredAltitudeM,
+      reachable,
     };
   }
 
@@ -405,7 +328,6 @@ export class GpuCoverageLayer {
 
   dispose(): void {
     this.gl.deleteProgram(this.numericProgram);
-    this.gl.deleteProgram(this.shadeProgram);
     this.gl.deleteTexture(this.heightTexture);
     this.gl.deleteTexture(this.numericTexture);
     this.gl.deleteFramebuffer(this.numericFramebuffer);
@@ -418,6 +340,39 @@ export class GpuCoverageLayer {
     gl.readPixels(0, 0, this.canvas.width, this.canvas.height, gl.RGBA, gl.FLOAT, output);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     return output;
+  }
+
+  readGpuCoverageData(): CoverageGridData | null {
+    if (!this.analysis) {
+      return null;
+    }
+
+    const width = this.canvas.width;
+    const height = this.canvas.height;
+    const numeric = this.readNumericCoverage();
+    const requiredAltitudeM = new Float32Array(width * height);
+    const reachableData = new Uint8Array(width * height);
+    for (let y = 0; y < height; y++) {
+      const gpuY = height - 1 - y;
+      for (let x = 0; x < width; x++) {
+        const numericOffset = (gpuY * width + x) * 4;
+        const reachable = (numeric[numericOffset + 1] ?? 0) >= 0.5;
+        const inRange = (numeric[numericOffset + 2] ?? 0) >= 0.5;
+        const outputIndex = y * width + x;
+        requiredAltitudeM[outputIndex] = numeric[numericOffset] ?? 0;
+        reachableData[outputIndex] = reachable && inRange ? 1 : 0;
+      }
+    }
+
+    const radiusM = analysisRadiusM(this.analysis, this.debugMode);
+    return {
+      coordinates: this.options.coordinatesForAnalysis(this.analysis.operator, radiusM),
+      gridSizePx: width,
+      engine: "gpu",
+      renderedOperator: this.analysis.operator,
+      requiredAltitudeM,
+      reachable: reachableData,
+    };
   }
 
   debugStats(): GpuCoverageDebugStats | null {
@@ -562,10 +517,6 @@ export class GpuCoverageLayer {
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
-
-  private operatorMercatorY(): number {
-    return (this.bounds!.north + this.bounds!.south) / 2;
-  }
 }
 
 async function loadTerrainTile(tile: DemTileId, token: string): Promise<DecodedTile> {
@@ -690,15 +641,4 @@ function setUniform1i(gl: WebGL2RenderingContext, program: WebGLProgram, name: s
 
 function setUniform2f(gl: WebGL2RenderingContext, program: WebGLProgram, name: string, x: number, y: number): void {
   gl.uniform2f(gl.getUniformLocation(program, name), x, y);
-}
-
-function setUniform3f(
-  gl: WebGL2RenderingContext,
-  program: WebGLProgram,
-  name: string,
-  x: number,
-  y: number,
-  z: number,
-): void {
-  gl.uniform3f(gl.getUniformLocation(program, name), x, y, z);
 }

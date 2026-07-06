@@ -14,6 +14,14 @@ function nearlyEqual(a, b, epsilon = 1e-7) {
   return Math.abs(a - b) <= epsilon;
 }
 
+function auditMessage(cpu, gpu) {
+  return `CPU audit:\n${JSON.stringify(cpu, null, 2)}\nGPU audit:\n${JSON.stringify(gpu, null, 2)}`;
+}
+
+function assertNearlyEqual(a, b, message, epsilon = 1e-7, cpuAudit = null, gpuAudit = null) {
+  assert(nearlyEqual(a, b, epsilon), `${message}: ${a} !== ${b}${cpuAudit ? `\n${auditMessage(cpuAudit, gpuAudit)}` : ""}`);
+}
+
 function samePoint(a, b) {
   return nearlyEqual(a.lng, b.lng) && nearlyEqual(a.lat, b.lat);
 }
@@ -72,6 +80,22 @@ async function normalClickMap(page, xRatio, yRatio) {
   await page.mouse.click(box.x + box.width * xRatio, box.y + box.height * yRatio);
 }
 
+async function setReferenceRadius(page, radiusM) {
+  await page.locator("label").filter({ hasText: "Reference radius" }).locator("input").evaluate(
+    (input, value) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, String(value));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    },
+    radiusM,
+  );
+}
+
+async function setCoverageMode(page, mode) {
+  await page.locator("label").filter({ hasText: "Coverage mode" }).locator("select").selectOption(mode);
+}
+
 async function coveragePixels(page) {
   return page.evaluate(() => {
     const canvas = document.querySelector("canvas[data-coverage-source=los-coverage]");
@@ -88,6 +112,128 @@ async function coveragePixels(page) {
       pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data),
     };
   });
+}
+
+async function sampledCoverageInspections(page) {
+  return page.evaluate(() => {
+    const debug = window.__droneRangeDebug;
+    if (!debug?.coverageCoordinates || !window.__inspectCoverageAt) {
+      throw new Error("coverage inspection hook unavailable");
+    }
+    const coords = debug.coverageCoordinates;
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const sampleAt = (u, v) => {
+      const northLng = lerp(coords[0][0], coords[1][0], u);
+      const northLat = lerp(coords[0][1], coords[1][1], u);
+      const southLng = lerp(coords[3][0], coords[2][0], u);
+      const southLat = lerp(coords[3][1], coords[2][1], u);
+      const lng = lerp(northLng, southLng, v);
+      const lat = lerp(northLat, southLat, v);
+      return window.__inspectCoverageAt(lng, lat);
+    };
+    return [
+      sampleAt(0.5, 0.5),
+      sampleAt(0.62, 0.5),
+      sampleAt(0.5, 0.62),
+      sampleAt(0.38, 0.5),
+      sampleAt(0.5, 0.38),
+      sampleAt(0.72, 0.58),
+      sampleAt(0.58, 0.72),
+    ];
+  });
+}
+
+async function coverageFootprintAudit(page) {
+  return page.evaluate(() => {
+    if (!window.__auditCoverageFootprint) {
+      throw new Error("coverage footprint audit hook unavailable");
+    }
+    return window.__auditCoverageFootprint();
+  });
+}
+
+async function renderedCoverageFootprint(page) {
+  return page.evaluate(async () => {
+    if (!window.__measureRenderedCoverageFootprint) {
+      throw new Error("rendered coverage footprint hook unavailable");
+    }
+    return window.__measureRenderedCoverageFootprint();
+  });
+}
+
+function assertSameArray(a, b, message, cpuAudit, gpuAudit, epsilon = 1e-7) {
+  assert(a.length === b.length, `${message}: length ${a.length} !== ${b.length}\n${auditMessage(cpuAudit, gpuAudit)}`);
+  for (let index = 0; index < a.length; index++) {
+    if (Array.isArray(a[index]) && Array.isArray(b[index])) {
+      assertSameArray(a[index], b[index], `${message}[${index}]`, cpuAudit, gpuAudit, epsilon);
+      continue;
+    }
+    assertNearlyEqual(a[index], b[index], `${message}[${index}]`, epsilon, cpuAudit, gpuAudit);
+  }
+}
+
+function assertSameObjectNumbers(a, b, message, cpuAudit, gpuAudit, epsilon = 1e-7) {
+  assert(Boolean(a) === Boolean(b), `${message}: presence mismatch\n${auditMessage(cpuAudit, gpuAudit)}`);
+  if (!a || !b) return;
+  for (const key of Object.keys(a)) {
+    assertNearlyEqual(a[key], b[key], `${message}.${key}`, epsilon, cpuAudit, gpuAudit);
+  }
+}
+
+function assertSameScreenBounds(a, b, message, cpuAudit, gpuAudit, epsilon = 0.75) {
+  assert(Boolean(a) === Boolean(b), `${message}: presence mismatch\n${auditMessage(cpuAudit, gpuAudit)}`);
+  if (!a || !b) return;
+  for (const key of ["minX", "minY", "maxX", "maxY"]) {
+    assertNearlyEqual(a[key], b[key], `${message}.${key}`, epsilon, cpuAudit, gpuAudit);
+  }
+  for (const corner of ["nw", "ne", "se", "sw"]) {
+    assertNearlyEqual(a[corner].x, b[corner].x, `${message}.${corner}.x`, epsilon, cpuAudit, gpuAudit);
+    assertNearlyEqual(a[corner].y, b[corner].y, `${message}.${corner}.y`, epsilon, cpuAudit, gpuAudit);
+  }
+}
+
+function assertSameFootprintAudit(cpu, gpu, expectedReferenceRadiusM) {
+  assert(cpu.referenceRadiusM === expectedReferenceRadiusM, `CPU audit did not capture requested reference radius\n${auditMessage(cpu, gpu)}`);
+  assert(gpu.referenceRadiusM === expectedReferenceRadiusM, `GPU audit did not capture requested reference radius\n${auditMessage(cpu, gpu)}`);
+  assertNearlyEqual(cpu.activeCalculationRadiusM, gpu.activeCalculationRadiusM, "active calculation radius mismatch", 1e-6, cpu, gpu);
+  assert(cpu.preferredEngine === "cpu-fallback", `CPU preferred engine mismatch\n${auditMessage(cpu, gpu)}`);
+  assert(gpu.preferredEngine === "gpu", `GPU preferred engine mismatch\n${auditMessage(cpu, gpu)}`);
+  assert(cpu.engine === "cpu-fallback", `CPU active engine mismatch\n${auditMessage(cpu, gpu)}`);
+  assert(gpu.engine === "gpu", `GPU active engine mismatch\n${auditMessage(cpu, gpu)}`);
+  assert(cpu.mapboxSource.type === "canvas" && gpu.mapboxSource.type === "canvas", `coverage source should stay canvas-backed\n${auditMessage(cpu, gpu)}`);
+  assert(cpu.canvas?.width === gpu.canvas?.width && cpu.canvas?.height === gpu.canvas?.height, `canvas dimensions mismatch\n${auditMessage(cpu, gpu)}`);
+  assertSameArray(cpu.coverageCoordinates, gpu.coverageCoordinates, "coverageCoordinates", cpu, gpu);
+  assertSameObjectNumbers(cpu.alphaBoundsCanvasPx, gpu.alphaBoundsCanvasPx, "alphaBoundsCanvasPx", cpu, gpu, 0);
+  assertSameObjectNumbers(cpu.alphaBoundsUv, gpu.alphaBoundsUv, "alphaBoundsUv", cpu, gpu);
+  assertSameScreenBounds(cpu.projectedAlphaBounds, gpu.projectedAlphaBounds, "projectedAlphaBounds", cpu, gpu);
+}
+
+function assertSameRenderedFootprint(cpu, gpu) {
+  const message = `CPU rendered footprint:\n${JSON.stringify(cpu, null, 2)}\nGPU rendered footprint:\n${JSON.stringify(gpu, null, 2)}`;
+  assert(cpu.changedPixels > 500, `CPU rendered coverage footprint was not detected\n${message}`);
+  assert(gpu.changedPixels > 500, `GPU rendered coverage footprint was not detected\n${message}`);
+  assert(Boolean(cpu.bounds) && Boolean(gpu.bounds), `rendered footprint bounds missing\n${message}`);
+
+  const areaRatio = gpu.changedPixels / cpu.changedPixels;
+  assert(areaRatio > 0.94 && areaRatio < 1.06, `rendered coverage area ratio mismatch: ${areaRatio.toFixed(4)}\n${message}`);
+  assert(Math.abs(cpu.radiusX - gpu.radiusX) <= 2, `rendered coverage radiusX mismatch\n${message}`);
+  assert(Math.abs(cpu.radiusY - gpu.radiusY) <= 2, `rendered coverage radiusY mismatch\n${message}`);
+  assert(Math.abs(cpu.center.x - gpu.center.x) <= 2, `rendered coverage center.x mismatch\n${message}`);
+  assert(Math.abs(cpu.center.y - gpu.center.y) <= 2, `rendered coverage center.y mismatch\n${message}`);
+}
+
+function assertSameInspections(cpu, gpu) {
+  assert(cpu.length === gpu.length, "CPU/GPU inspection sample counts should match");
+  for (let index = 0; index < cpu.length; index++) {
+    const a = cpu[index];
+    const b = gpu[index];
+    assert(a.canvas && b.canvas, `inspection ${index} should have canvas pixels`);
+    assert(a.canvas.x === b.canvas.x && a.canvas.y === b.canvas.y, `inspection ${index} should map to same canvas pixel`);
+    assert(
+      a.canvas.rgba.join(",") === b.canvas.rgba.join(","),
+      `inspection ${index} pixel mismatch at ${a.canvas.x},${a.canvas.y}: CPU ${a.canvas.rgba.join(",")} GPU ${b.canvas.rgba.join(",")}`,
+    );
+  }
 }
 
 function averageRgbError(a, b, flipY = false) {
@@ -148,12 +294,54 @@ async function main() {
     assert(initial.sourceTypeCounts.image === undefined, "initial style should not contain stale image sources");
     assert(initial.sourceTypeCounts.canvas === 1, "initial style should have exactly one canvas source");
 
-    const initialOperator = clone(initial.latestOperator);
-    const initialRenderedOperator = clone(initial.renderedOperator);
-    const initialFingerprint = initial.coverageCanvasFingerprint;
-    const initialCoverage = clone(initial.coverageCoordinates);
-    const initialReferenceCircle = clone(initial.referenceCircle);
-    const initialSequence = initial.renderSequence;
+    await setReferenceRadius(page, 4000);
+    await setCoverageMode(page, "los");
+    const afterRadius = await waitForDebug(
+      page,
+      ([sequence]) => {
+        const debug = window.__droneRangeDebug;
+        return Boolean(
+          debug?.renderSequence > sequence &&
+            debug.coverageCoordinates &&
+            debug.referenceCircle,
+        );
+      },
+      "LOS reference radius scenario did not re-render coverage",
+      undefined,
+      [initial.renderSequence],
+    );
+    assert(afterRadius.referenceCircle, "reference radius change should keep a reference circle");
+    await page.getByText("Calculation settings").click();
+    await page.getByRole("button", { name: "CPU" }).click();
+    await waitForDebug(
+      page,
+      () => window.__droneRangeDebug?.preferredEngine === "cpu-fallback" && window.__droneRangeDebug?.engine === "cpu-fallback",
+      "CPU renderer did not become active for footprint audit",
+    );
+    const initialCpuFootprintAudit = await coverageFootprintAudit(page);
+    await page.getByRole("button", { name: "GPU" }).click();
+    await waitForDebug(
+      page,
+      () => window.__droneRangeDebug?.preferredEngine === "gpu" && window.__droneRangeDebug?.engine === "gpu",
+      "GPU renderer did not become active for footprint audit",
+    );
+    const initialGpuFootprintAudit = await coverageFootprintAudit(page);
+    assertSameFootprintAudit(initialCpuFootprintAudit, initialGpuFootprintAudit, 4000);
+    await page.getByRole("button", { name: "CPU" }).click();
+    await waitForDebug(
+      page,
+      () => window.__droneRangeDebug?.preferredEngine === "cpu-fallback" && window.__droneRangeDebug?.engine === "cpu-fallback",
+      "CPU renderer did not become active after footprint audit",
+    );
+    await page.getByText("Calculation settings").click();
+
+    const auditedInitial = await debugState(page);
+    const initialOperator = clone(auditedInitial.latestOperator);
+    const initialRenderedOperator = clone(auditedInitial.renderedOperator);
+    const initialFingerprint = auditedInitial.coverageCanvasFingerprint;
+    const initialCoverage = clone(auditedInitial.coverageCoordinates);
+    const initialReferenceCircle = clone(auditedInitial.referenceCircle);
+    const initialSequence = auditedInitial.renderSequence;
 
     await dragMarker(page, 130, 70);
     await waitForDebug(
@@ -311,6 +499,7 @@ async function main() {
       "CPU renderer did not become active",
     );
     const cpuPixels = await coveragePixels(page);
+    const cpuInspections = await sampledCoverageInspections(page);
     await page.getByRole("button", { name: "GPU" }).click();
     await waitForDebug(
       page,
@@ -318,6 +507,8 @@ async function main() {
       "GPU renderer did not become active",
     );
     const gpuPixels = await coveragePixels(page);
+    const gpuInspections = await sampledCoverageInspections(page);
+    assertSameInspections(cpuInspections, gpuInspections);
     const directError = averageRgbError(cpuPixels, gpuPixels);
     const flippedError = averageRgbError(cpuPixels, gpuPixels, true);
     assert(
