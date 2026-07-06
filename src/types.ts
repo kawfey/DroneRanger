@@ -51,7 +51,8 @@ export type DebugMode =
   | "telemetry"
   | "video"
   | "los"
-  | "blocker";
+  | "blocker"
+  | "height-map";
 
 export type CoverageEngine = "gpu" | "cpu-fallback";
 

@@ -17,6 +17,7 @@ import {
   analysisRadiusM,
   inspectFlatEarthPixel,
   inspectTerrainPixel,
+  occlusionHeightM,
   type TerrainSampler,
 } from "./analysis/singleRay";
 import {
@@ -81,6 +82,7 @@ const debugModes: Array<{ id: DebugMode; label: string }> = [
   { id: "telemetry", label: "Telemetry" },
   { id: "video", label: "Video" },
   { id: "los", label: "Line of Sight" },
+  { id: "height-map", label: "Occlusion height map" },
 ];
 
 type InspectorTarget = {
@@ -215,6 +217,49 @@ export function renderCoverageImage(
   context.imageSmoothingEnabled = false;
   const imageData = context.createImageData(gridSize, gridSize);
 
+  if (debugMode === "height-map") {
+    const heights = new Float32Array(gridSize * gridSize);
+    let minHeightM = Infinity;
+    let maxHeightM = -Infinity;
+    for (let y = 0; y < gridSize; y++) {
+      for (let x = 0; x < gridSize; x++) {
+        const dx = ((x + 0.5) / gridSize) * 2 - 1;
+        const dy = ((y + 0.5) / gridSize) * 2 - 1;
+        if (dx * dx + dy * dy > 1) {
+          heights[y * gridSize + x] = NaN;
+          continue;
+        }
+        const target = mercator01ToLngLat(gridCellMercator(spec, x, y));
+        const heightM = map ? occlusionHeightM(map, analysis, target) : 0;
+        heights[y * gridSize + x] = heightM;
+        minHeightM = Math.min(minHeightM, heightM);
+        maxHeightM = Math.max(maxHeightM, heightM);
+      }
+    }
+    for (let index = 0; index < heights.length; index++) {
+      const heightM = heights[index];
+      if (!Number.isFinite(heightM)) {
+        continue;
+      }
+      const [r, g, b, a] = shadeHeightMap(heightM, minHeightM, maxHeightM);
+      const offset = index * 4;
+      imageData.data[offset] = r;
+      imageData.data[offset + 1] = g;
+      imageData.data[offset + 2] = b;
+      imageData.data[offset + 3] = a;
+    }
+    context.putImageData(imageData, 0, 0);
+    const totalMs = performance.now() - startedAt;
+    return {
+      canvas: displayCanvas,
+      coordinates: coverageImageCoordinates(analysis.operator, radiusM),
+      gridSizePx: gridSize,
+      engine: "cpu-fallback",
+      renderedOperator: analysis.operator,
+      timings: { totalMs, cpuSolveMs: totalMs },
+    };
+  }
+
   for (let y = 0; y < gridSize; y++) {
     for (let x = 0; x < gridSize; x++) {
       const mercator = gridCellMercator(spec, x, y);
@@ -322,6 +367,26 @@ function ensureCoverageCanvasSource(
   map.setPaintProperty("los-coverage", "raster-fade-duration", 0);
   map.setPaintProperty("los-coverage", "raster-opacity", 0.86);
   map.triggerRepaint();
+}
+
+function shadeHeightMap(heightM: number, minHeightM: number, maxHeightM: number): [number, number, number, number] {
+  const span = Math.max(0.001, maxHeightM - minHeightM);
+  const t = Math.max(0, Math.min(1, (heightM - minHeightM) / span));
+  const stops: Array<{ t: number; color: [number, number, number] }> = [
+    { t: 0, color: [34, 48, 92] },
+    { t: 0.35, color: [31, 147, 139] },
+    { t: 0.7, color: [246, 196, 83] },
+    { t: 1, color: [238, 88, 73] },
+  ];
+  const upper = stops.find((stop) => stop.t >= t) ?? stops[stops.length - 1];
+  const lower = stops[Math.max(0, stops.indexOf(upper) - 1)];
+  const localT = upper.t === lower.t ? 0 : (t - lower.t) / (upper.t - lower.t);
+  return [
+    Math.round(lower.color[0] + (upper.color[0] - lower.color[0]) * localT),
+    Math.round(lower.color[1] + (upper.color[1] - lower.color[1]) * localT),
+    Math.round(lower.color[2] + (upper.color[2] - lower.color[2]) * localT),
+    210,
+  ];
 }
 
 function updateCoverageLayer(

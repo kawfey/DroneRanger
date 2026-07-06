@@ -219,7 +219,7 @@ function profileForMode(request: AnalysisRequest, debugMode: DebugMode): LinkPro
 }
 
 function selectedProfilesForMode(request: AnalysisRequest, debugMode: DebugMode): LinkProfile[] {
-  if (debugMode === "los" || debugMode === "blocker") {
+  if (debugMode === "los" || debugMode === "blocker" || debugMode === "height-map") {
     return [];
   }
   const modeProfile = profileForMode(request, debugMode);
@@ -238,7 +238,14 @@ function baseViolationCriteria(
 ): Set<string> {
   const criteria = new Set<string>();
   if (distanceM > activeRadiusM) {
-    criteria.add(request.calculationRange.mode === "auto" && debugMode !== "los" && debugMode !== "blocker" ? "RF" : "Range");
+    criteria.add(
+      request.calculationRange.mode === "auto" &&
+        debugMode !== "los" &&
+        debugMode !== "blocker" &&
+        debugMode !== "height-map"
+        ? "RF"
+        : "Range",
+    );
   } else if (activeMarginDb < 0) {
     criteria.add("RF");
   }

@@ -367,6 +367,10 @@ export class GpuCoverageLayer {
       return null;
     }
 
+    if (this.debugMode === "height-map") {
+      return this.renderHeightMap();
+    }
+
     const gl = this.gl;
     const startedAt = performance.now();
     const radiusM = analysisRadiusM(this.analysis, this.debugMode);
@@ -404,6 +408,9 @@ export class GpuCoverageLayer {
   }
 
   renderCpuReference(): CoverageOverlay | null {
+    if (this.debugMode === "height-map") {
+      return this.renderHeightMap("cpu-fallback");
+    }
     const solveStartedAt = performance.now();
     const data = this.solveCpuReferenceData();
     const cpuSolveMs = performance.now() - solveStartedAt;
@@ -414,6 +421,70 @@ export class GpuCoverageLayer {
       ...this.lastUpdateTimings,
       cpuSolveMs,
     });
+  }
+
+  private renderHeightMap(engine: CoverageOverlay["engine"] = "gpu"): CoverageOverlay | null {
+    if (!this.analysis || !this.heightData) {
+      return null;
+    }
+    const startedAt = performance.now();
+    this.gpuCanvas.width = this.canvas.width;
+    this.gpuCanvas.height = this.canvas.height;
+    const context = this.gpuCanvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+    context.imageSmoothingEnabled = false;
+    const imageData = context.createImageData(this.canvas.width, this.canvas.height);
+    let minHeightM = Infinity;
+    let maxHeightM = -Infinity;
+    for (let y = 0; y < this.canvas.height; y++) {
+      for (let x = 0; x < this.canvas.width; x++) {
+        const dx = ((x + 0.5) / this.canvas.width) * 2 - 1;
+        const dy = ((y + 0.5) / this.canvas.height) * 2 - 1;
+        if (dx * dx + dy * dy > 1) {
+          continue;
+        }
+        const sourceX = Math.max(0, Math.min(this.options.texturePx - 1, Math.floor((x / this.canvas.width) * this.options.texturePx)));
+        const sourceY = Math.max(0, Math.min(this.options.texturePx - 1, Math.floor((y / this.canvas.height) * this.options.texturePx)));
+        const heightM = this.heightData[sourceY * this.options.texturePx + sourceX] ?? 0;
+        minHeightM = Math.min(minHeightM, heightM);
+        maxHeightM = Math.max(maxHeightM, heightM);
+      }
+    }
+    for (let y = 0; y < this.canvas.height; y++) {
+      for (let x = 0; x < this.canvas.width; x++) {
+        const dx = ((x + 0.5) / this.canvas.width) * 2 - 1;
+        const dy = ((y + 0.5) / this.canvas.height) * 2 - 1;
+        if (dx * dx + dy * dy > 1) {
+          continue;
+        }
+        const sourceX = Math.max(0, Math.min(this.options.texturePx - 1, Math.floor((x / this.canvas.width) * this.options.texturePx)));
+        const sourceY = Math.max(0, Math.min(this.options.texturePx - 1, Math.floor((y / this.canvas.height) * this.options.texturePx)));
+        const heightM = this.heightData[sourceY * this.options.texturePx + sourceX] ?? 0;
+        const [r, g, b, a] = shadeHeightMap(heightM, minHeightM, maxHeightM);
+        const offset = (y * this.canvas.width + x) * 4;
+        imageData.data[offset] = r;
+        imageData.data[offset + 1] = g;
+        imageData.data[offset + 2] = b;
+        imageData.data[offset + 3] = a;
+      }
+    }
+    context.putImageData(imageData, 0, 0);
+    const radiusM = analysisRadiusM(this.analysis, this.debugMode);
+    const renderMs = performance.now() - startedAt;
+    return {
+      canvas: this.gpuCanvas,
+      coordinates: this.options.coordinatesForAnalysis(this.analysis.operator, radiusM),
+      gridSizePx: this.canvas.width,
+      engine,
+      renderedOperator: this.analysis.operator,
+      timings: {
+        totalMs: renderMs,
+        ...this.lastUpdateTimings,
+        renderMs,
+      },
+    };
   }
 
   solveCpuReferenceData(): CoverageGridData | null {
@@ -695,7 +766,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 function maxReachM(analysis: AnalysisRequest, debugMode: DebugMode, activeRadiusM: number): number {
-  if (debugMode === "los" || debugMode === "blocker") {
+  if (debugMode === "los" || debugMode === "blocker" || debugMode === "height-map") {
     return activeRadiusM;
   }
 
@@ -731,6 +802,26 @@ function debugModeIndex(debugMode: DebugMode): number {
 
 function altitudeCriterionIndex(criterion: AnalysisRequest["altitudeCriterion"]): number {
   return criterion === "agl" ? 1 : 0;
+}
+
+function shadeHeightMap(heightM: number, minHeightM: number, maxHeightM: number): [number, number, number, number] {
+  const span = Math.max(0.001, maxHeightM - minHeightM);
+  const t = Math.max(0, Math.min(1, (heightM - minHeightM) / span));
+  const stops: Array<{ t: number; color: [number, number, number] }> = [
+    { t: 0, color: [34, 48, 92] },
+    { t: 0.35, color: [31, 147, 139] },
+    { t: 0.7, color: [246, 196, 83] },
+    { t: 1, color: [238, 88, 73] },
+  ];
+  const upper = stops.find((stop) => stop.t >= t) ?? stops[stops.length - 1];
+  const lower = stops[Math.max(0, stops.indexOf(upper) - 1)];
+  const localT = upper.t === lower.t ? 0 : (t - lower.t) / (upper.t - lower.t);
+  return [
+    Math.round(lower.color[0] + (upper.color[0] - lower.color[0]) * localT),
+    Math.round(lower.color[1] + (upper.color[1] - lower.color[1]) * localT),
+    Math.round(lower.color[2] + (upper.color[2] - lower.color[2]) * localT),
+    210,
+  ];
 }
 
 function createProgram(gl: WebGL2RenderingContext, vertexSource: string, fragmentSource: string): WebGLProgram {

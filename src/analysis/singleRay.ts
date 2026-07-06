@@ -41,6 +41,15 @@ export type LosRayResult = {
   targetTerrainM: number;
 };
 
+export function occlusionHeightM(
+  map: TerrainSampler,
+  request: AnalysisRequest,
+  lngLat: { lng: number; lat: number },
+): number {
+  const terrainM = terrainElevation(map, lngLat);
+  return obstacleElevation(map, request, lngLat, terrainM).elevationM;
+}
+
 function limitingMarginDb(distanceM: number, profiles: LinkProfile[]): number {
   const margins = profiles.map((profile) => linkMarginDb(distanceM, profile));
   return margins.length > 0 ? Math.min(...margins) : 0;
@@ -57,7 +66,7 @@ function selectedProfilesForMode(
   request: AnalysisRequest,
   debugMode: DebugMode,
 ): LinkProfile[] {
-  if (debugMode === "los" || debugMode === "blocker") {
+  if (debugMode === "los" || debugMode === "blocker" || debugMode === "height-map") {
     return [];
   }
   const modeProfile = profileForMode(request, debugMode);
@@ -68,7 +77,7 @@ function selectedProfilesForMode(
 }
 
 export function analysisRadiusM(request: AnalysisRequest, debugMode: DebugMode): number {
-  if (debugMode === "los" || debugMode === "blocker") {
+  if (debugMode === "los" || debugMode === "blocker" || debugMode === "height-map") {
     return request.radiusM;
   }
   if (request.calculationRange.mode === "manual") {
@@ -278,7 +287,7 @@ function baseViolationCriteria(
 }
 
 function isRfMode(debugMode: DebugMode): boolean {
-  return debugMode !== "los" && debugMode !== "blocker";
+  return debugMode !== "los" && debugMode !== "blocker" && debugMode !== "height-map";
 }
 
 function criteriaFromLabel(label: string): Set<string> {
