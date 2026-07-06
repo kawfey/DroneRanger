@@ -152,15 +152,6 @@ async function coverageFootprintAudit(page) {
   });
 }
 
-async function renderedCoverageFootprint(page) {
-  return page.evaluate(async () => {
-    if (!window.__measureRenderedCoverageFootprint) {
-      throw new Error("rendered coverage footprint hook unavailable");
-    }
-    return window.__measureRenderedCoverageFootprint();
-  });
-}
-
 function assertSameArray(a, b, message, cpuAudit, gpuAudit, epsilon = 1e-7) {
   assert(a.length === b.length, `${message}: length ${a.length} !== ${b.length}\n${auditMessage(cpuAudit, gpuAudit)}`);
   for (let index = 0; index < a.length; index++) {

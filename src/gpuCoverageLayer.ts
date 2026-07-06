@@ -21,7 +21,6 @@ import type {
   CoverageCoordinates,
   CoverageGridData,
   CoverageOverlay,
-  CoveragePixel,
   DebugMode,
   LinkProfile,
 } from "./types";
@@ -73,7 +72,6 @@ uniform vec2 u_operatorUv;
 uniform float u_antennaHeightM;
 uniform float u_minAltitudeM;
 uniform float u_maxAltitudeM;
-uniform float u_stepAltitudeM;
 uniform float u_radiusM;
 uniform float u_maxReachM;
 uniform int u_raySteps;
@@ -267,7 +265,6 @@ export class GpuCoverageLayer {
     setUniform1f(gl, this.numericProgram, "u_antennaHeightM", this.analysis.operator.antennaHeightM);
     setUniform1f(gl, this.numericProgram, "u_minAltitudeM", this.analysis.altitude.minM);
     setUniform1f(gl, this.numericProgram, "u_maxAltitudeM", this.analysis.altitude.maxM);
-    setUniform1f(gl, this.numericProgram, "u_stepAltitudeM", this.analysis.altitude.stepM);
     setUniform1f(gl, this.numericProgram, "u_radiusM", radiusM);
     setUniform1f(gl, this.numericProgram, "u_maxReachM", maxReachM(this.analysis, this.debugMode, radiusM));
     setUniform1i(gl, this.numericProgram, "u_raySteps", coverageRaySteps);
@@ -320,10 +317,6 @@ export class GpuCoverageLayer {
       requiredAltitudeM,
       reachable,
     };
-  }
-
-  readCoveragePixel(_lngLat: { lng: number; lat: number }): CoveragePixel | null {
-    return null;
   }
 
   dispose(): void {
