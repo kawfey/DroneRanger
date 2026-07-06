@@ -230,11 +230,21 @@ function ensureCoverageCanvasSource(
   overlay: CoverageOverlay,
 ): void {
   const existingSource = map.getSource("los-coverage") as
-    | (mapboxgl.CanvasSource & { type?: string; setCoordinates?: (coordinates: CoverageCoordinates) => void })
+    | (mapboxgl.CanvasSource & {
+        type?: string;
+        width?: number;
+        height?: number;
+        setCoordinates?: (coordinates: CoverageCoordinates) => void;
+      })
     | undefined;
   const isCanvasSource = !existingSource || existingSource.type === "canvas" || typeof existingSource.setCoordinates === "function";
+  const hasStaleTextureSize = existingSource
+    ? isCanvasSource && (existingSource.width !== overlay.canvas.width || existingSource.height !== overlay.canvas.height)
+    : false;
 
-  if (existingSource && !isCanvasSource) {
+  overlay.canvas.style.imageRendering = "pixelated";
+
+  if (existingSource && (!isCanvasSource || hasStaleTextureSize)) {
     if (map.getLayer("los-coverage")) {
       map.removeLayer("los-coverage");
     }
