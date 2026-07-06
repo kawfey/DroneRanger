@@ -170,7 +170,7 @@ function coverageImageCoordinates(
   ];
 }
 
-function renderCoverageImage(
+export function renderCoverageImage(
   map: TerrainSampler | null,
   analysis: AnalysisRequest,
   debugMode: DebugMode,
@@ -256,6 +256,14 @@ function ensureCoverageCanvasSource(
     canvasSource.setCoordinates(overlay.coordinates);
   }
 
+  const refreshedSource = map.getSource("los-coverage") as
+    | (mapboxgl.CanvasSource & { pause?: () => void; play?: () => void })
+    | undefined;
+  refreshedSource?.play?.();
+  map.once("render", () => {
+    refreshedSource?.pause?.();
+  });
+
   if (!map.getLayer("los-coverage")) {
     map.addLayer(
       {
@@ -290,7 +298,7 @@ function stylePreviewUrl(style: MapStyleTemplate): string {
   return `https://api.mapbox.com/styles/v1/${path}/static/-3.7038,40.4168,11,0/104x104?access_token=${token}`;
 }
 
-function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisRequest, debugMode: DebugMode): void {
+export function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisRequest, debugMode: DebugMode): void {
   if (!map.getSource("mapbox-dem")) {
     map.addSource("mapbox-dem", {
       type: "raster-dem",
@@ -299,7 +307,7 @@ function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisRequest, deb
       maxzoom: 14,
     });
   }
-  map.setTerrain(null);
+  map.setTerrain({ source: "mapbox-dem", exaggeration: 1 });
 
   if (map.getSource("composite") && !map.getLayer("los-building-reference")) {
     map.addLayer({

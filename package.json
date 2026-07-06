@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:ui": "node scripts/marker-regression.mjs",
+    "test:operator-move": "node scripts/operator-move-refresh.mjs",
     "test:gpu": "node scripts/gpu-validation.mjs"
   },
   "dependencies": {
