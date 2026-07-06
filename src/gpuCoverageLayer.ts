@@ -9,19 +9,14 @@ import {
 import { clampGridSize, coverageRaySteps, createCoverageGridSpec } from "./analysis/coverageGrid";
 import { analysisRadiusM } from "./analysis/singleRay";
 import { combinedMaxFreeSpaceRangeM, maxFreeSpaceRangeM } from "./analysis/rf";
-import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile } from "./types";
+import type { AnalysisRequest, CoverageCoordinates, CoverageOverlay, CoveragePixel, DebugMode, LinkProfile } from "./types";
 
-type CoverageImageCoordinates = [[number, number], [number, number], [number, number], [number, number]];
-
-export type GpuCoverageImage = {
-  canvas: HTMLCanvasElement;
-  coordinates: CoverageImageCoordinates;
-};
+export type GpuCoverageImage = CoverageOverlay;
 
 export type GpuCoverageLayerOptions = {
   mapboxToken: string;
   texturePx: number;
-  coordinatesForAnalysis: (operator: AnalysisRequest["operator"], radiusM: number) => CoverageImageCoordinates;
+  coordinatesForAnalysis: (operator: AnalysisRequest["operator"], radiusM: number) => CoverageCoordinates;
 };
 
 type DecodedTile = {
@@ -265,6 +260,9 @@ export class GpuCoverageLayer {
     return {
       canvas: this.canvas,
       coordinates: this.options.coordinatesForAnalysis(this.analysis.operator, radiusM),
+      gridSizePx: this.canvas.width,
+      engine: "gpu",
+      renderedOperator: this.analysis.operator,
     };
   }
 

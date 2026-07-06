@@ -54,6 +54,16 @@ export type DebugMode =
 
 export type CoverageEngine = "gpu" | "cpu-fallback";
 
+export type CoverageCoordinates = [[number, number], [number, number], [number, number], [number, number]];
+
+export type CoverageOverlay = {
+  canvas: HTMLCanvasElement;
+  coordinates: CoverageCoordinates;
+  gridSizePx: number;
+  engine: CoverageEngine;
+  renderedOperator: AnalysisRequest["operator"];
+};
+
 export type CoveragePixel = {
   requiredAltitudeM: number;
   requiredElevationChangeM: number;

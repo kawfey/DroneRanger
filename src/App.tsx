@@ -33,6 +33,8 @@ import { GpuCoverageLayer, type GpuCoverageImage } from "./gpuCoverageLayer";
 import type {
   AnalysisRequest,
   CoverageEngine,
+  CoverageCoordinates,
+  CoverageOverlay,
   CoveragePixel,
   DebugMode,
   LinkProfile,
@@ -80,12 +82,26 @@ type InspectorTarget = {
   lat: number;
 };
 
-type CoverageImage = {
-  canvas: HTMLCanvasElement;
-  coordinates: [[number, number], [number, number], [number, number], [number, number]];
+type DroneRangeDebugState = {
+  latestOperator: AnalysisRequest["operator"];
+  renderedOperator: AnalysisRequest["operator"] | null;
+  coverageCoordinates: CoverageCoordinates | null;
+  coverageCanvasFingerprint: string | null;
+  renderSequence: number;
+  engine: CoverageEngine;
+  hasCoverageSource: boolean;
+  sourceType: string | null;
+  sourceTypeCounts: Record<string, number>;
+  referenceCircle: ReferenceCircleFeature | null;
+  markerLngLat: { lng: number; lat: number } | null;
 };
 
-const coverageTexturePx = 768;
+declare global {
+  interface Window {
+    __droneRangeDebug?: DroneRangeDebugState;
+  }
+}
+
 const enableGpuCoverage = false;
 
 function profileLabel(id: LinkProfileId): string {
@@ -159,7 +175,7 @@ function updateReferenceCircle(map: mapboxgl.Map, analysis: AnalysisRequest): vo
 function coverageImageCoordinates(
   operator: AnalysisRequest["operator"],
   radiusM: number,
-): CoverageImage["coordinates"] {
+): CoverageCoordinates {
   const center = lngLatToMercator01(operator.lng, operator.lat);
   const radius = metersToMercatorUnits(radiusM, operator.lat);
   const nw = mercator01ToLngLat({ x: center.x - radius, y: center.y - radius });
@@ -178,16 +194,22 @@ function renderCoverageImage(
   map: TerrainSampler | null,
   analysis: AnalysisRequest,
   debugMode: DebugMode,
-): CoverageImage {
+  displayCanvas: HTMLCanvasElement,
+): CoverageOverlay {
   const radiusM = analysisRadiusM(analysis, debugMode);
   const spec = createCoverageGridSpec(analysis, debugMode);
   const gridSize = clampGridSize(analysis.gridSizePx);
-  const canvas = document.createElement("canvas");
-  canvas.width = gridSize;
-  canvas.height = gridSize;
-  const context = canvas.getContext("2d");
+  displayCanvas.width = gridSize;
+  displayCanvas.height = gridSize;
+  const context = displayCanvas.getContext("2d");
   if (!context) {
-    return { canvas, coordinates: coverageImageCoordinates(analysis.operator, radiusM) };
+    return {
+      canvas: displayCanvas,
+      coordinates: coverageImageCoordinates(analysis.operator, radiusM),
+      gridSizePx: gridSize,
+      engine: "cpu-fallback",
+      renderedOperator: analysis.operator,
+    };
   }
   context.imageSmoothingEnabled = false;
   const imageData = context.createImageData(gridSize, gridSize);
@@ -215,42 +237,110 @@ function renderCoverageImage(
   context.putImageData(imageData, 0, 0);
 
   return {
-    canvas,
+    canvas: displayCanvas,
     coordinates: coverageImageCoordinates(analysis.operator, radiusM),
+    gridSizePx: gridSize,
+    engine: "cpu-fallback",
+    renderedOperator: analysis.operator,
   };
 }
 
-function applyCoverageImageLayer(
-  map: mapboxgl.Map,
-  image: CoverageImage | GpuCoverageImage,
-): void {
-  if (map.getLayer("los-coverage")) {
-    map.removeLayer("los-coverage");
+function getCoverageSourceType(map: mapboxgl.Map): string | null {
+  try {
+    const styleSource = map.getStyle().sources?.["los-coverage"];
+    if (typeof styleSource?.type === "string") {
+      return styleSource.type;
+    }
+  } catch {
+    // Fall through to the runtime source, which may be available during style transitions.
   }
-  if (map.getSource("los-coverage")) {
+  const source = map.getSource("los-coverage") as ({ type?: string } & Record<string, unknown>) | undefined;
+  return typeof source?.type === "string" ? source.type : source ? "unknown" : null;
+}
+
+function getStyleSourceTypeCounts(map: mapboxgl.Map): Record<string, number> {
+  try {
+    const style = map.getStyle();
+    return Object.values(style.sources ?? {}).reduce<Record<string, number>>((counts, source) => {
+      const type = typeof source.type === "string" ? source.type : "unknown";
+      counts[type] = (counts[type] ?? 0) + 1;
+      return counts;
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
+function canvasFingerprint(canvas: HTMLCanvasElement): string | null {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context || canvas.width === 0 || canvas.height === 0) {
+    return null;
+  }
+  try {
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let hash = 2166136261;
+    const stride = Math.max(4, Math.floor(data.length / 2048));
+    for (let index = 0; index < data.length; index += stride) {
+      hash ^= data[index] ?? 0;
+      hash = Math.imul(hash, 16777619);
+    }
+    return `${canvas.width}x${canvas.height}:${(hash >>> 0).toString(16)}`;
+  } catch {
+    return null;
+  }
+}
+
+function ensureCoverageCanvasSource(
+  map: mapboxgl.Map,
+  overlay: CoverageOverlay | GpuCoverageImage,
+): void {
+  const existingSource = map.getSource("los-coverage") as
+    | (mapboxgl.CanvasSource & { type?: string; setCoordinates?: (coordinates: CoverageCoordinates) => void })
+    | undefined;
+  const isCanvasSource = !existingSource || existingSource.type === "canvas" || typeof existingSource.setCoordinates === "function";
+
+  if (existingSource && !isCanvasSource) {
+    if (map.getLayer("los-coverage")) {
+      map.removeLayer("los-coverage");
+    }
     map.removeSource("los-coverage");
   }
 
-  map.addSource("los-coverage", {
-    type: "canvas",
-    canvas: image.canvas,
-    coordinates: image.coordinates,
-    animate: false,
-  });
+  const canvasSource = map.getSource("los-coverage") as
+    | (mapboxgl.CanvasSource & { setCoordinates?: (coordinates: CoverageCoordinates) => void })
+    | undefined;
 
-  map.addLayer(
-    {
-      id: "los-coverage",
-      type: "raster",
-      source: "los-coverage",
-      paint: {
-        "raster-opacity": 0.86,
-        "raster-fade-duration": 0,
-        "raster-resampling": "nearest",
+  if (!canvasSource) {
+    map.addSource("los-coverage", {
+      type: "canvas",
+      canvas: overlay.canvas,
+      coordinates: overlay.coordinates,
+      animate: true,
+    });
+  } else if (typeof canvasSource.setCoordinates === "function") {
+    canvasSource.setCoordinates(overlay.coordinates);
+  }
+
+  const refreshedSource = map.getSource("los-coverage") as
+    | (mapboxgl.CanvasSource & { play?: () => void })
+    | undefined;
+  refreshedSource?.play?.();
+
+  if (!map.getLayer("los-coverage")) {
+    map.addLayer(
+      {
+        id: "los-coverage",
+        type: "raster",
+        source: "los-coverage",
+        paint: {
+          "raster-opacity": 0.86,
+          "raster-fade-duration": 0,
+          "raster-resampling": "nearest",
+        },
       },
-    },
-    map.getLayer("reference-radius-line") ? "reference-radius-line" : undefined,
-  );
+      map.getLayer("reference-radius-line") ? "reference-radius-line" : undefined,
+    );
+  }
   map.setPaintProperty("los-coverage", "raster-resampling", "nearest");
   map.setPaintProperty("los-coverage", "raster-fade-duration", 0);
   map.triggerRepaint();
@@ -260,8 +350,9 @@ function updateCoverageLayer(
   map: mapboxgl.Map,
   analysis: AnalysisRequest,
   debugMode: DebugMode,
+  displayCanvas: HTMLCanvasElement,
 ): void {
-  applyCoverageImageLayer(map, renderCoverageImage(map, analysis, debugMode));
+  ensureCoverageCanvasSource(map, renderCoverageImage(map, analysis, debugMode, displayCanvas));
 }
 
 function stylePreviewUrl(style: MapStyleTemplate): string {
@@ -345,6 +436,7 @@ function operatorFromLngLat(
 export function App() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const gpuCoverageRef = useRef<GpuCoverageLayer | null>(null);
+  const coverageDisplayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const coverageRenderSeqRef = useRef(0);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
@@ -361,6 +453,71 @@ export function App() {
   const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? mapStyleTemplates[0];
   const latestAnalysisRef = useRef(analysis);
 
+  function updateDebugState(patch: Partial<DroneRangeDebugState> = {}) {
+    if (!import.meta.env.DEV) return;
+    const map = mapRef.current;
+    window.__droneRangeDebug = {
+      latestOperator: latestAnalysisRef.current.operator,
+      renderedOperator: window.__droneRangeDebug?.renderedOperator ?? null,
+      coverageCoordinates: window.__droneRangeDebug?.coverageCoordinates ?? null,
+      coverageCanvasFingerprint: window.__droneRangeDebug?.coverageCanvasFingerprint ?? null,
+      renderSequence: coverageRenderSeqRef.current,
+      engine: coverageEngine,
+      hasCoverageSource: Boolean(map?.getSource("los-coverage")),
+      sourceType: map ? getCoverageSourceType(map) : null,
+      sourceTypeCounts: map ? getStyleSourceTypeCounts(map) : {},
+      referenceCircle: map
+        ? referenceCircleFeature(latestAnalysisRef.current.operator, latestAnalysisRef.current.radiusM)
+        : null,
+      markerLngLat: markerRef.current
+        ? {
+            lng: markerRef.current.getLngLat().lng,
+            lat: markerRef.current.getLngLat().lat,
+          }
+        : null,
+      ...patch,
+    };
+  }
+
+  function getCoverageDisplayCanvas(): HTMLCanvasElement {
+    if (!coverageDisplayCanvasRef.current) {
+      const canvas = document.createElement("canvas");
+      canvas.style.display = "none";
+      canvas.dataset.coverageSource = "los-coverage";
+      document.body.appendChild(canvas);
+      coverageDisplayCanvasRef.current = canvas;
+    }
+    return coverageDisplayCanvasRef.current;
+  }
+
+  function applyCoverageOverlay(map: mapboxgl.Map, overlay: CoverageOverlay | GpuCoverageImage): void {
+    const displayCanvas = getCoverageDisplayCanvas();
+    if (displayCanvas !== overlay.canvas) {
+      displayCanvas.width = overlay.gridSizePx;
+      displayCanvas.height = overlay.gridSizePx;
+      const context = displayCanvas.getContext("2d");
+      if (context) {
+        context.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+        context.drawImage(overlay.canvas, 0, 0, displayCanvas.width, displayCanvas.height);
+      }
+    }
+
+    ensureCoverageCanvasSource(map, {
+      ...overlay,
+      canvas: displayCanvas,
+    });
+    updateDebugState({
+      coverageCoordinates: overlay.coordinates,
+      coverageCanvasFingerprint: canvasFingerprint(displayCanvas),
+      renderedOperator: overlay.renderedOperator,
+      renderSequence: coverageRenderSeqRef.current,
+      engine: overlay.engine,
+      hasCoverageSource: Boolean(map.getSource("los-coverage")),
+      sourceType: getCoverageSourceType(map),
+      sourceTypeCounts: getStyleSourceTypeCounts(map),
+    });
+  }
+
   const coverageEngineLabel =
     coverageEngine === "gpu"
       ? "GPU terrain"
@@ -376,7 +533,7 @@ export function App() {
         if (!gpuCoverageRef.current) {
           gpuCoverageRef.current = GpuCoverageLayer.create({
             mapboxToken,
-            texturePx: coverageTexturePx,
+            texturePx: clampGridSize(nextAnalysis.gridSizePx),
             coordinatesForAnalysis: coverageImageCoordinates,
           });
         }
@@ -384,8 +541,8 @@ export function App() {
         if (gpuCoverage) {
           await gpuCoverage.updateAnalysis(nextAnalysis, nextDebugMode);
           const image = gpuCoverage.render();
-          if (image && sequence === coverageRenderSeqRef.current && map.isStyleLoaded()) {
-            applyCoverageImageLayer(map, image);
+          if (image && sequence === coverageRenderSeqRef.current) {
+            applyCoverageOverlay(map, image);
             setCoverageEngine("gpu");
             return;
           }
@@ -395,10 +552,20 @@ export function App() {
       }
     }
 
-    if (sequence !== coverageRenderSeqRef.current || !map.isStyleLoaded()) {
+    if (sequence !== coverageRenderSeqRef.current) {
       return;
     }
-    updateCoverageLayer(map, nextAnalysis, nextDebugMode);
+    updateCoverageLayer(map, nextAnalysis, nextDebugMode, getCoverageDisplayCanvas());
+    updateDebugState({
+      coverageCoordinates: coverageImageCoordinates(nextAnalysis.operator, analysisRadiusM(nextAnalysis, nextDebugMode)),
+      coverageCanvasFingerprint: canvasFingerprint(getCoverageDisplayCanvas()),
+      renderedOperator: nextAnalysis.operator,
+      renderSequence: coverageRenderSeqRef.current,
+      engine: "cpu-fallback",
+      hasCoverageSource: Boolean(map.getSource("los-coverage")),
+      sourceType: getCoverageSourceType(map),
+      sourceTypeCounts: getStyleSourceTypeCounts(map),
+    });
     setCoverageEngine("cpu-fallback");
   }
 
@@ -433,6 +600,7 @@ export function App() {
     markerRef.current = new mapboxgl.Marker({ draggable: true, color: "#1f8fff" })
       .setLngLat([analysis.operator.lng, analysis.operator.lat])
       .addTo(map);
+    updateDebugState();
 
     markerRef.current.on("dragend", () => {
       const lngLat = markerRef.current!.getLngLat();
@@ -477,6 +645,10 @@ export function App() {
 
     map.on("load", () => {
       installAnalysisLayers(map, analysis, debugMode);
+      updateDebugState({
+        sourceType: getCoverageSourceType(map),
+        referenceCircle: referenceCircleFeature(latestAnalysisRef.current.operator, latestAnalysisRef.current.radiusM),
+      });
       map.once("idle", () => {
         void refreshCoverageLayer(map, latestAnalysisRef.current, debugMode);
         setMapDataRevision((revision) => revision + 1);
@@ -487,8 +659,13 @@ export function App() {
       markerRef.current?.remove();
       gpuCoverageRef.current?.dispose();
       gpuCoverageRef.current = null;
+      coverageDisplayCanvasRef.current?.remove();
+      coverageDisplayCanvasRef.current = null;
       map.remove();
       mapRef.current = null;
+      if (import.meta.env.DEV) {
+        delete window.__droneRangeDebug;
+      }
     };
   }, [hasToken]);
 
@@ -499,6 +676,16 @@ export function App() {
       updateReferenceCircle(mapRef.current, analysis);
       void refreshCoverageLayer(mapRef.current, analysis, debugMode);
     }
+    updateDebugState({
+      latestOperator: analysis.operator,
+      referenceCircle: referenceCircleFeature(analysis.operator, analysis.radiusM),
+      markerLngLat: markerRef.current
+        ? {
+            lng: markerRef.current.getLngLat().lng,
+            lat: markerRef.current.getLngLat().lat,
+          }
+        : null,
+    });
   }, [analysis, debugMode]);
 
   useEffect(() => {
