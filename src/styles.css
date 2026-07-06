@@ -331,7 +331,7 @@ output {
 
 .inspector {
   left: 16px;
-  bottom: 54px;
+  bottom: 92px;
   width: min(300px, calc(100vw - 32px));
   padding: 12px;
   border-radius: 8px;
@@ -356,7 +356,7 @@ output {
 
 .hint {
   left: 16px;
-  bottom: 16px;
+  bottom: 36px;
   display: flex;
   align-items: center;
   gap: 8px;
