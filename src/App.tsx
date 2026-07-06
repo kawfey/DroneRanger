@@ -8,6 +8,7 @@ import {
   Layers,
   MapPin,
   Radio,
+  RefreshCw,
   Settings,
   Square,
 } from "lucide-react";
@@ -843,6 +844,12 @@ export function App() {
     });
   }
 
+  function manuallyReloadCoverage() {
+    const map = mapRef.current;
+    if (!map) return;
+    void refreshCoverageLayer(map, latestAnalysisRef.current, debugMode);
+  }
+
   const isMap3d = mapCamera.pitch > 1;
 
   return (
@@ -860,6 +867,14 @@ export function App() {
         <div className="panel-title">
           <Antenna size={18} />
           <span>Range Calculator</span>
+          <button
+            type="button"
+            title="Reload coverage"
+            aria-label="Reload coverage"
+            onClick={manuallyReloadCoverage}
+          >
+            <RefreshCw size={16} aria-hidden="true" />
+          </button>
         </div>
 
         <label>
