@@ -72,6 +72,8 @@ const mapStyleTemplates: MapStyleTemplate[] = [
   { id: "standard", label: "Standard", uri: "mapbox://styles/mapbox/standard" },
 ];
 
+const defaultMapStyle = mapStyleTemplates.find((style) => style.id === "outdoors") ?? mapStyleTemplates[0];
+
 const debugModes: Array<{ id: DebugMode; label: string }> = [
   { id: "combined", label: "Combined" },
   { id: "control", label: "Control" },
@@ -416,7 +418,7 @@ export function App() {
   const coverageRenderSeqRef = useRef(0);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
-  const previousStyleUriRef = useRef(mapStyleTemplates[0].uri);
+  const previousStyleUriRef = useRef(defaultMapStyle.uri);
   const [analysis, setAnalysis] = useState<AnalysisRequest>(defaultAnalysis);
   const [debugMode, setDebugMode] = useState<DebugMode>("combined");
   const [inspector, setInspector] = useState<CoveragePixel | null>(null);
@@ -424,11 +426,11 @@ export function App() {
   const [mapDataRevision, setMapDataRevision] = useState(0);
   const [coverageEngine, setCoverageEngine] = useState<CoverageEngine>("cpu-fallback");
   const [preferredCoverageEngine, setPreferredCoverageEngine] = useState<CoverageEngine>("gpu");
-  const [selectedStyleId, setSelectedStyleId] = useState(mapStyleTemplates[0].id);
+  const [selectedStyleId, setSelectedStyleId] = useState(defaultMapStyle.id);
   const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
   const [mapCamera, setMapCamera] = useState({ bearing: 0, pitch: 0 });
   const hasToken = Boolean(token && token !== "your_mapbox_token_here");
-  const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? mapStyleTemplates[0];
+  const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? defaultMapStyle;
   const latestAnalysisRef = useRef(analysis);
 
   function updateDebugState(patch: Partial<DroneRangeDebugState> = {}) {
