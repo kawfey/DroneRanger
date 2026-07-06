@@ -27,10 +27,14 @@ export function plotCoverageGridData(
       if (!reachable && debugMode !== "los") {
         continue;
       }
+      const altitudeM =
+        analysis.altitudeCriterion === "agl"
+          ? data.requiredAltitudeAglM[index] ?? 0
+          : data.requiredAltitudeM[index] ?? 0;
       const [r, g, b, a] =
         debugMode === "los"
           ? shadeLosReachability(reachable)
-          : shadeRequiredAltitude(data.requiredAltitudeM[index] ?? 0, analysis);
+          : shadeRequiredAltitude(altitudeM, analysis);
       const offset = index * 4;
       imageData.data[offset] = r;
       imageData.data[offset + 1] = g;

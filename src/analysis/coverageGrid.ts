@@ -114,7 +114,7 @@ export function solveHeightFieldPixel(
   if (!isGridCellInCircle(spec, x, y)) {
     criteria.add("Range");
   }
-  if (los.requiredAltitudeM > request.altitude.maxM) {
+  if (altitudeCriterionValue(request, los) > request.altitude.maxM) {
     criteria.add("Terrain");
   }
 
@@ -149,10 +149,7 @@ export function evaluateHeightFieldLosRay(
   const operatorTerrain = sampleHeightField(field, spec.operatorMercator);
   const targetTerrain = sampleHeightField(field, targetMercator);
   const operatorAbsM = operatorTerrain + request.operator.antennaHeightM;
-  let requiredTargetAbsM = Math.max(
-    operatorAbsM + request.altitude.minM,
-    targetTerrain + request.altitude.minM,
-  );
+  let requiredTargetAbsM = minimumTargetAltitudeM(request, operatorAbsM, targetTerrain);
 
   for (let step = 1; step < coverageRaySteps; step++) {
     const t = step / coverageRaySteps;
@@ -170,6 +167,24 @@ export function evaluateHeightFieldLosRay(
     minDroneAltitudeAglM: altitudeAglM(requiredTargetAbsM, targetTerrain),
     operatorAltitudeAslM: operatorAbsM,
   };
+}
+
+function minimumTargetAltitudeM(
+  request: AnalysisRequest,
+  operatorAbsM: number,
+  targetTerrainM: number,
+): number {
+  if (request.altitudeCriterion === "agl") {
+    return targetTerrainM + Math.max(0, request.altitude.minM);
+  }
+  return Math.max(operatorAbsM + request.altitude.minM, targetTerrainM + request.altitude.minM);
+}
+
+function altitudeCriterionValue(
+  request: AnalysisRequest,
+  los: { requiredElevationChangeM: number; minDroneAltitudeAglM: number },
+): number {
+  return request.altitudeCriterion === "agl" ? los.minDroneAltitudeAglM : los.requiredElevationChangeM;
 }
 
 export function solveHeightFieldGrid(spec: CoverageGridSpec, field: HeightField): CoveragePixel[] {

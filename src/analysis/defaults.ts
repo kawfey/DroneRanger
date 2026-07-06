@@ -51,10 +51,11 @@ export const defaultAnalysis: AnalysisRequest = {
     mode: "auto",
     manualM: 5000,
   },
+  altitudeCriterion: "elevation-change",
+  colorSteps: 20,
   altitude: {
     minM: 0,
     maxM: 120,
-    stepM: 5,
   },
   profiles: defaultProfiles,
   selectedProfileIds: ["control", "telemetry", "video"],

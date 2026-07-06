@@ -56,6 +56,7 @@ uniform vec2 u_operatorUv;
 uniform float u_antennaHeightM;
 uniform float u_minAltitudeM;
 uniform float u_maxAltitudeM;
+uniform int u_altitudeCriterion;
 uniform float u_radiusM;
 uniform float u_maxReachM;
 uniform int u_raySteps;
@@ -96,7 +97,10 @@ vec4 solveCoverage(vec2 terrainUv) {
 
   float operatorAbsM = heightAt(u_operatorUv) + u_antennaHeightM;
   float targetTerrainM = heightAt(terrainUv);
-  float requiredTargetAbsM = max(operatorAbsM + u_minAltitudeM, targetTerrainM + u_minAltitudeM);
+  float minAltitudeM = u_altitudeCriterion == 1 ? max(0.0, u_minAltitudeM) : u_minAltitudeM;
+  float requiredTargetAbsM = u_altitudeCriterion == 1
+    ? targetTerrainM + minAltitudeM
+    : max(operatorAbsM + minAltitudeM, targetTerrainM + minAltitudeM);
 
   for (int step = 1; step < 128; step++) {
     if (step >= u_raySteps) {
@@ -109,8 +113,10 @@ vec4 solveCoverage(vec2 terrainUv) {
   }
 
   float requiredAltitudeM = requiredTargetAbsM - operatorAbsM;
-  float reachable = requiredAltitudeM <= u_maxAltitudeM ? 1.0 : 0.0;
-  return vec4(requiredAltitudeM, reachable, rangePass, distanceM);
+  float requiredAltitudeAglM = max(0.0, requiredTargetAbsM - targetTerrainM);
+  float criterionAltitudeM = u_altitudeCriterion == 1 ? requiredAltitudeAglM : requiredAltitudeM;
+  float reachable = criterionAltitudeM <= u_maxAltitudeM ? 1.0 : 0.0;
+  return vec4(requiredAltitudeM, requiredAltitudeAglM, reachable * rangePass, distanceM);
 }
 
 void main() {
@@ -127,7 +133,8 @@ uniform vec2 u_operatorUv;
 uniform float u_antennaHeightM;
 uniform float u_minAltitudeM;
 uniform float u_maxAltitudeM;
-uniform float u_altitudeStepM;
+uniform float u_colorSteps;
+uniform int u_altitudeCriterion;
 uniform float u_radiusM;
 uniform float u_maxReachM;
 uniform int u_raySteps;
@@ -169,7 +176,10 @@ vec4 solveCoverage(vec2 terrainUv) {
 
   float operatorAbsM = heightAt(u_operatorUv) + u_antennaHeightM;
   float targetTerrainM = heightAt(terrainUv);
-  float requiredTargetAbsM = max(operatorAbsM + u_minAltitudeM, targetTerrainM + u_minAltitudeM);
+  float minAltitudeM = u_altitudeCriterion == 1 ? max(0.0, u_minAltitudeM) : u_minAltitudeM;
+  float requiredTargetAbsM = u_altitudeCriterion == 1
+    ? targetTerrainM + minAltitudeM
+    : max(operatorAbsM + minAltitudeM, targetTerrainM + minAltitudeM);
 
   for (int step = 1; step < 128; step++) {
     if (step >= u_raySteps) {
@@ -182,15 +192,18 @@ vec4 solveCoverage(vec2 terrainUv) {
   }
 
   float requiredAltitudeM = requiredTargetAbsM - operatorAbsM;
-  float reachable = requiredAltitudeM <= u_maxAltitudeM ? 1.0 : 0.0;
-  return vec4(requiredAltitudeM, reachable, rangePass, distanceM);
+  float requiredAltitudeAglM = max(0.0, requiredTargetAbsM - targetTerrainM);
+  float criterionAltitudeM = u_altitudeCriterion == 1 ? requiredAltitudeAglM : requiredAltitudeM;
+  float reachable = criterionAltitudeM <= u_maxAltitudeM ? 1.0 : 0.0;
+  return vec4(requiredAltitudeM, requiredAltitudeAglM, reachable * rangePass, distanceM);
 }
 
 vec3 altitudeColor(float requiredAltitudeM) {
-  float span = max(0.001, u_maxAltitudeM - u_minAltitudeM);
-  float altitudeStepM = max(0.001, abs(u_altitudeStepM));
-  float steppedAltitudeM = u_minAltitudeM + ceil((requiredAltitudeM - u_minAltitudeM) / altitudeStepM) * altitudeStepM;
-  float t = clamp((steppedAltitudeM - u_minAltitudeM) / span, 0.0, 1.0);
+  float minAltitudeM = u_altitudeCriterion == 1 ? max(0.0, u_minAltitudeM) : u_minAltitudeM;
+  float span = max(0.001, u_maxAltitudeM - minAltitudeM);
+  float altitudeStepM = span / max(1.0, floor(u_colorSteps + 0.5));
+  float steppedAltitudeM = minAltitudeM + ceil((requiredAltitudeM - minAltitudeM) / altitudeStepM) * altitudeStepM;
+  float t = clamp((steppedAltitudeM - minAltitudeM) / span, 0.0, 1.0);
   vec3 green = vec3(31.0, 184.0, 88.0) / 255.0;
   vec3 yellow = vec3(247.0, 220.0, 72.0) / 255.0;
   vec3 orange = vec3(242.0, 143.0, 44.0) / 255.0;
@@ -207,8 +220,8 @@ vec3 altitudeColor(float requiredAltitudeM) {
 void main() {
   vec2 terrainUv = vec2(v_uv.x, 1.0 - v_uv.y);
   vec4 coverage = solveCoverage(terrainUv);
-  float reachable = coverage.y * coverage.z;
-  if (coverage.w <= 0.0 && coverage.x == 0.0 && coverage.y == 0.0) {
+  float reachable = coverage.z;
+  if (coverage.w <= 0.0 && coverage.x == 0.0 && coverage.y == 0.0 && coverage.z == 0.0) {
     outColor = vec4(0.0);
     return;
   }
@@ -220,7 +233,8 @@ void main() {
     outColor = vec4(0.0);
     return;
   }
-  outColor = vec4(altitudeColor(coverage.x), 178.0 / 255.0);
+  float altitudeM = u_altitudeCriterion == 1 ? coverage.y : coverage.x;
+  outColor = vec4(altitudeColor(altitudeM), 178.0 / 255.0);
 }`;
 
 export class GpuCoverageLayer {
@@ -363,7 +377,8 @@ export class GpuCoverageLayer {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     this.bindCoverageUniforms(this.colorProgram, radiusM);
-    setUniform1f(gl, this.colorProgram, "u_altitudeStepM", this.analysis.altitude.stepM);
+    setUniform1f(gl, this.colorProgram, "u_colorSteps", this.analysis.colorSteps);
+    setUniform1i(gl, this.colorProgram, "u_altitudeCriterion", altitudeCriterionIndex(this.analysis.altitudeCriterion));
     setUniform1i(gl, this.colorProgram, "u_debugMode", debugModeIndex(this.debugMode));
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -415,10 +430,12 @@ export class GpuCoverageLayer {
     };
     const pixels = solveHeightFieldGrid(spec, field);
     const requiredAltitudeM = new Float32Array(pixels.length);
+    const requiredAltitudeAglM = new Float32Array(pixels.length);
     const reachable = new Uint8Array(pixels.length);
     for (let index = 0; index < pixels.length; index++) {
       const pixel = pixels[index];
       requiredAltitudeM[index] = pixel?.requiredAltitudeM ?? 0;
+      requiredAltitudeAglM[index] = pixel?.minDroneAltitudeAglM ?? 0;
       reachable[index] = pixel?.reachable ? 1 : 0;
     }
 
@@ -429,6 +446,7 @@ export class GpuCoverageLayer {
       engine: "cpu-fallback",
       renderedOperator: this.analysis.operator,
       requiredAltitudeM,
+      requiredAltitudeAglM,
       reachable,
     };
   }
@@ -465,16 +483,17 @@ export class GpuCoverageLayer {
     const height = this.canvas.height;
     const numeric = this.readNumericCoverage();
     const requiredAltitudeM = new Float32Array(width * height);
+    const requiredAltitudeAglM = new Float32Array(width * height);
     const reachableData = new Uint8Array(width * height);
     for (let y = 0; y < height; y++) {
       const gpuY = height - 1 - y;
       for (let x = 0; x < width; x++) {
         const numericOffset = (gpuY * width + x) * 4;
-        const reachable = (numeric[numericOffset + 1] ?? 0) >= 0.5;
-        const inRange = (numeric[numericOffset + 2] ?? 0) >= 0.5;
+        const reachable = (numeric[numericOffset + 2] ?? 0) >= 0.5;
         const outputIndex = y * width + x;
         requiredAltitudeM[outputIndex] = numeric[numericOffset] ?? 0;
-        reachableData[outputIndex] = reachable && inRange ? 1 : 0;
+        requiredAltitudeAglM[outputIndex] = numeric[numericOffset + 1] ?? 0;
+        reachableData[outputIndex] = reachable ? 1 : 0;
       }
     }
 
@@ -485,6 +504,7 @@ export class GpuCoverageLayer {
       engine: "gpu",
       renderedOperator: this.analysis.operator,
       requiredAltitudeM,
+      requiredAltitudeAglM,
       reachable: reachableData,
     };
   }
@@ -582,6 +602,7 @@ export class GpuCoverageLayer {
     setUniform1f(gl, program, "u_antennaHeightM", this.analysis.operator.antennaHeightM);
     setUniform1f(gl, program, "u_minAltitudeM", this.analysis.altitude.minM);
     setUniform1f(gl, program, "u_maxAltitudeM", this.analysis.altitude.maxM);
+    setUniform1i(gl, program, "u_altitudeCriterion", altitudeCriterionIndex(this.analysis.altitudeCriterion));
     setUniform1f(gl, program, "u_radiusM", radiusM);
     setUniform1f(gl, program, "u_maxReachM", maxReachM(this.analysis, this.debugMode, radiusM));
     setUniform1i(gl, program, "u_raySteps", coverageRaySteps);
@@ -706,6 +727,10 @@ function selectedProfilesForMode(analysis: AnalysisRequest, debugMode: DebugMode
 
 function debugModeIndex(debugMode: DebugMode): number {
   return debugMode === "los" ? 4 : 0;
+}
+
+function altitudeCriterionIndex(criterion: AnalysisRequest["altitudeCriterion"]): number {
+  return criterion === "agl" ? 1 : 0;
 }
 
 function createProgram(gl: WebGL2RenderingContext, vertexSource: string, fragmentSource: string): WebGLProgram {

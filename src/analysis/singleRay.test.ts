@@ -157,6 +157,33 @@ describe("single ray inspector", () => {
     expect(inspected.requiredElevationChangeM).toBe(0);
   });
 
+  it("keeps AGL altitude unsigned below the operator", () => {
+    const request = {
+      ...defaultAnalysis,
+      altitudeCriterion: "agl" as const,
+      altitude: {
+        ...defaultAnalysis.altitude,
+        minM: 0,
+        maxM: 1,
+      },
+    };
+    const target = {
+      lng: request.operator.lng + 0.01,
+      lat: request.operator.lat,
+    };
+    const downhillMap = {
+      queryTerrainElevation: (lngLat: { lng: number }) =>
+        lngLat.lng === request.operator.lng ? 100 : 0,
+    };
+
+    const inspected = inspectTerrainPixel(downhillMap, request, target, "los");
+
+    expect(inspected.requiredElevationChangeM).toBeLessThan(0);
+    expect(inspected.minDroneAltitudeAglM).toBe(0);
+    expect(inspected.reachable).toBe(true);
+    expect(inspected.violationCriteria).toBe("None");
+  });
+
   it("marks points unreachable when required elevation change exceeds max altitude", () => {
     const request = {
       ...defaultAnalysis,

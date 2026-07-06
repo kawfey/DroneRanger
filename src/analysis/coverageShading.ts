@@ -11,7 +11,7 @@ export function shadeForPixel(
   if (!pixel.reachable) {
     return [0, 0, 0, 0];
   }
-  return shadeRequiredAltitude(pixel.requiredAltitudeM, analysis);
+  return shadeRequiredAltitude(altitudeCriterionValue(pixel, analysis), analysis);
 }
 
 export function shadeLosReachability(reachable: boolean): [number, number, number, number] {
@@ -19,15 +19,16 @@ export function shadeLosReachability(reachable: boolean): [number, number, numbe
 }
 
 export function shadeRequiredAltitude(
-  requiredAltitudeM: number,
+  altitudeM: number,
   analysis: AnalysisRequest,
 ): [number, number, number, number] {
-  const span = Math.max(0.001, analysis.altitude.maxM - analysis.altitude.minM);
-  const altitudeStepM = Math.max(0.001, Math.abs(analysis.altitude.stepM));
+  const minAltitudeM = minColorAltitudeM(analysis);
+  const span = Math.max(0.001, analysis.altitude.maxM - minAltitudeM);
+  const altitudeStepM = span / Math.max(1, Math.round(analysis.colorSteps));
   const steppedAltitudeM =
-    analysis.altitude.minM +
-    Math.ceil((requiredAltitudeM - analysis.altitude.minM) / altitudeStepM) * altitudeStepM;
-  const t = Math.max(0, Math.min(1, (steppedAltitudeM - analysis.altitude.minM) / span));
+    minAltitudeM +
+    Math.ceil((altitudeM - minAltitudeM) / altitudeStepM) * altitudeStepM;
+  const t = Math.max(0, Math.min(1, (steppedAltitudeM - minAltitudeM) / span));
   const stops: Array<{ t: number; color: [number, number, number] }> = [
     { t: 0, color: [31, 184, 88] },
     { t: 0.5, color: [247, 220, 72] },
@@ -41,4 +42,12 @@ export function shadeRequiredAltitude(
   const g = Math.round(lower.color[1] + (upper.color[1] - lower.color[1]) * localT);
   const b = Math.round(lower.color[2] + (upper.color[2] - lower.color[2]) * localT);
   return [r, g, b, 178];
+}
+
+export function altitudeCriterionValue(pixel: CoveragePixel, analysis: AnalysisRequest): number {
+  return analysis.altitudeCriterion === "agl" ? pixel.minDroneAltitudeAglM : pixel.requiredElevationChangeM;
+}
+
+function minColorAltitudeM(analysis: AnalysisRequest): number {
+  return analysis.altitudeCriterion === "agl" ? Math.max(0, analysis.altitude.minM) : analysis.altitude.minM;
 }

@@ -175,10 +175,15 @@ output {
   font-size: 0.78rem;
 }
 
+.grid-two,
 .grid-three,
 .profile-grid {
   display: grid;
   gap: 8px;
+}
+
+.grid-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .grid-three {

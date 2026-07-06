@@ -102,11 +102,12 @@ export function inspectFlatEarthPixel(
   const criteria = baseViolationCriteria(request, debugMode, distanceM, activeRadiusM, activeMarginDb);
   const reachable = criteria.size === 0;
   const operatorAbsM = request.operator.antennaHeightM;
-  const targetAbsM = operatorAbsM + request.altitude.minM;
+  const targetTerrainM = 0;
+  const targetAbsM = minimumTargetAltitudeM(request, operatorAbsM, targetTerrainM);
   return {
-    requiredAltitudeM: request.altitude.minM,
-    requiredElevationChangeM: request.altitude.minM,
-    minDroneAltitudeAglM: Math.max(0, request.altitude.minM),
+    requiredAltitudeM: targetAbsM - operatorAbsM,
+    requiredElevationChangeM: targetAbsM - operatorAbsM,
+    minDroneAltitudeAglM: altitudeAglM(targetAbsM, targetTerrainM),
     operatorAltitudeAslM: operatorAbsM,
     violationCriteria: criteriaLabel(criteria),
     reachable,
@@ -125,14 +126,15 @@ export function evaluateFlatEarthLosRay(
   target: { lng: number; lat: number },
 ): LosRayResult {
   const operatorAbsM = request.operator.antennaHeightM;
-  const requiredTargetAbsM = operatorAbsM + request.altitude.minM;
+  const targetTerrainM = 0;
+  const requiredTargetAbsM = minimumTargetAltitudeM(request, operatorAbsM, targetTerrainM);
   return {
-    requiredAltitudeM: request.altitude.minM,
+    requiredAltitudeM: requiredTargetAbsM - operatorAbsM,
     requiredTargetAbsM,
     requiredElevationChangeM: requiredTargetAbsM - operatorAbsM,
     operatorAltitudeAslM: operatorAbsM,
     limitingObstacle: null,
-    targetTerrainM: 0,
+    targetTerrainM,
   };
 }
 
@@ -146,10 +148,7 @@ export function evaluateTerrainLosRay(
   const operatorAbsM = operatorTerrain + request.operator.antennaHeightM;
   const operatorMercator = lngLatToMercator01(request.operator.lng, request.operator.lat);
   const targetMercator = lngLatToMercator01(target.lng, target.lat);
-  let requiredTargetAbsM = Math.max(
-    operatorAbsM + request.altitude.minM,
-    targetTerrain + request.altitude.minM,
-  );
+  let requiredTargetAbsM = minimumTargetAltitudeM(request, operatorAbsM, targetTerrain);
   let limitingObstacle: ObstacleSample["source"] | null = null;
 
   for (let step = 1; step < raySteps; step++) {
@@ -186,7 +185,7 @@ export function inspectTerrainPixel(
   const pixel = inspectFlatEarthPixel(request, target, debugMode);
   const los = evaluateTerrainLosRay(map, request, target);
   const criteria = criteriaFromLabel(pixel.violationCriteria);
-  if (los.requiredAltitudeM > request.altitude.maxM) {
+  if (altitudeCriterionValue(request, los) > request.altitude.maxM) {
     criteria.add(los.limitingObstacle === "building" ? "Building" : "Terrain");
   }
 
@@ -200,6 +199,26 @@ export function inspectTerrainPixel(
     violationCriteria: criteriaLabel(criteria),
     reachable,
   };
+}
+
+function minimumTargetAltitudeM(
+  request: AnalysisRequest,
+  operatorAbsM: number,
+  targetTerrainM: number,
+): number {
+  if (request.altitudeCriterion === "agl") {
+    return targetTerrainM + Math.max(0, request.altitude.minM);
+  }
+  return Math.max(operatorAbsM + request.altitude.minM, targetTerrainM + request.altitude.minM);
+}
+
+function altitudeCriterionValue(
+  request: AnalysisRequest,
+  los: { requiredElevationChangeM: number; requiredTargetAbsM: number; targetTerrainM: number },
+): number {
+  return request.altitudeCriterion === "agl"
+    ? altitudeAglM(los.requiredTargetAbsM, los.targetTerrainM)
+    : los.requiredElevationChangeM;
 }
 
 function terrainElevation(

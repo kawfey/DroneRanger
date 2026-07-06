@@ -230,7 +230,7 @@ window.runGpuCoverageValidation = async () => {
     radiusM: 4000,
     gridSizePx: 100,
     calculationRange: { mode: "manual", manualM: 4000 },
-    altitude: { minM: 0, maxM: 120, stepM: 5 },
+    altitude: { minM: 0, maxM: 120 },
   });
 
   try {

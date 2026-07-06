@@ -34,10 +34,11 @@ export type AnalysisRequest = {
   radiusM: number;
   gridSizePx: number;
   calculationRange: CalculationRange;
+  altitudeCriterion: "elevation-change" | "agl";
+  colorSteps: number;
   altitude: {
     minM: number;
     maxM: number;
-    stepM: number;
   };
   profiles: LinkProfile[];
   selectedProfileIds: LinkProfileId[];
@@ -83,6 +84,7 @@ export type CoverageGridData = {
   engine: CoverageEngine;
   renderedOperator: AnalysisRequest["operator"];
   requiredAltitudeM: Float32Array;
+  requiredAltitudeAglM: Float32Array;
   reachable: Uint8Array;
 };
 

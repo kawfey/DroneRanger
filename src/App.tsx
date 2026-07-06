@@ -909,7 +909,7 @@ export function App() {
           </span>
         </label>
 
-        <div className="grid-three">
+        <div className="grid-two">
           <label>
             Min alt
             <span className="input-with-unit">
@@ -928,17 +928,6 @@ export function App() {
                 type="number"
                 value={analysis.altitude.maxM}
                 onChange={(event) => setAltitude("maxM", Number(event.target.value))}
-              />
-              <span>m</span>
-            </span>
-          </label>
-          <label>
-            Step
-            <span className="input-with-unit">
-              <input
-                type="number"
-                value={analysis.altitude.stepM}
-                onChange={(event) => setAltitude("stepM", Number(event.target.value))}
               />
               <span>m</span>
             </span>
@@ -993,6 +982,33 @@ export function App() {
             </button>
           </div>
 
+          <div className="segmented two" role="radiogroup" aria-label="Altitude criterion">
+            <button
+              type="button"
+              className={analysis.altitudeCriterion === "elevation-change" ? "active" : ""}
+              onClick={() =>
+                setAnalysis((current) => ({
+                  ...current,
+                  altitudeCriterion: "elevation-change",
+                }))
+              }
+            >
+              Elev change
+            </button>
+            <button
+              type="button"
+              className={analysis.altitudeCriterion === "agl" ? "active" : ""}
+              onClick={() =>
+                setAnalysis((current) => ({
+                  ...current,
+                  altitudeCriterion: "agl",
+                }))
+              }
+            >
+              AGL
+            </button>
+          </div>
+
           <label>
             Calculation range
             <span className="input-with-unit">
@@ -1019,6 +1035,22 @@ export function App() {
                 ? `${Math.round(effectiveCalculationRadiusM).toLocaleString()} m auto`
                 : `${Math.round(effectiveCalculationRadiusM).toLocaleString()} m manual`}
             </output>
+          </label>
+
+          <label>
+            Color steps
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={analysis.colorSteps}
+              onChange={(event) =>
+                setAnalysis((current) => ({
+                  ...current,
+                  colorSteps: Math.max(1, Math.round(Number(event.target.value) || 1)),
+                }))
+              }
+            />
           </label>
 
           <label>
