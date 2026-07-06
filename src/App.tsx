@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import {
   Activity,
@@ -7,18 +7,17 @@ import {
   Layers,
   MapPin,
   Radio,
-  RefreshCw,
   Settings,
 } from "lucide-react";
 import { defaultAnalysis } from "./analysis/defaults";
-import { inspectFlatEarthPixel, inspectTerrainPixel } from "./analysis/singleRay";
-import { LosCoverageLayer } from "./vendor/shademap";
-import { analysisRadiusM, coverageTextureSizeFor } from "./vendor/shademap/CoverageRenderer";
+import {
+  analysisRadiusM,
+  inspectFlatEarthPixel,
+  inspectTerrainPixel,
+} from "./analysis/singleRay";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile, LinkProfileId } from "./types";
 
 const token = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
-const minGridResolutionM = 5;
-const maxGridResolutionM = 500;
 
 type MapStyleTemplate = {
   id: string;
@@ -54,6 +53,11 @@ type ReferenceCircleFeature = {
   };
 };
 
+type InspectorTarget = {
+  lng: number;
+  lat: number;
+};
+
 function profileLabel(id: LinkProfileId): string {
   return id[0].toUpperCase() + id.slice(1);
 }
@@ -72,20 +76,6 @@ function updateProfile(
   patch: Partial<LinkProfile>,
 ): LinkProfile[] {
   return profiles.map((profile) => (profile.id === id ? { ...profile, ...patch } : profile));
-}
-
-function gridResolutionToSlider(valueM: number): number {
-  const min = Math.log(minGridResolutionM);
-  const max = Math.log(maxGridResolutionM);
-  const clamped = Math.max(minGridResolutionM, Math.min(maxGridResolutionM, valueM));
-  return ((Math.log(clamped) - min) / (max - min)) * 100;
-}
-
-function sliderToGridResolution(value: number): number {
-  const min = Math.log(minGridResolutionM);
-  const max = Math.log(maxGridResolutionM);
-  const normalized = Math.max(0, Math.min(100, value)) / 100;
-  return Math.round(Math.exp(min + normalized * (max - min)));
 }
 
 function dbmToMw(dbm: number): number {
@@ -141,12 +131,7 @@ function stylePreviewUrl(style: MapStyleTemplate): string {
   return `https://api.mapbox.com/styles/v1/${path}/static/-3.7038,40.4168,11,0/104x104?access_token=${token}`;
 }
 
-function installAnalysisLayers(
-  map: mapboxgl.Map,
-  analysis: AnalysisRequest,
-  debugMode: DebugMode,
-  layerRef: MutableRefObject<LosCoverageLayer | null>,
-): void {
+function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisRequest): void {
   if (!map.getSource("reference-radius")) {
     map.addSource("reference-radius", {
       type: "geojson",
@@ -181,10 +166,6 @@ function installAnalysisLayers(
     });
   }
 
-  const layer = new LosCoverageLayer(analysis, debugMode);
-  layerRef.current = layer;
-  map.addLayer(layer, "reference-radius-line");
-  map.once("idle", () => layer.refreshSources());
 }
 
 function operatorFromLngLat(
@@ -201,21 +182,17 @@ function operatorFromLngLat(
 export function App() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
-  const layerRef = useRef<LosCoverageLayer | null>(null);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
   const previousStyleUriRef = useRef(mapStyleTemplates[0].uri);
   const [analysis, setAnalysis] = useState<AnalysisRequest>(defaultAnalysis);
   const [debugMode, setDebugMode] = useState<DebugMode>("combined");
   const [inspector, setInspector] = useState<CoveragePixel | null>(null);
-  const [inspectorTarget, setInspectorTarget] = useState<{ lng: number; lat: number } | null>(null);
-  const [mapDataRevision, setMapDataRevision] = useState(0);
+  const [inspectorTarget, setInspectorTarget] = useState<InspectorTarget | null>(null);
   const [selectedStyleId, setSelectedStyleId] = useState(mapStyleTemplates[0].id);
   const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
   const hasToken = Boolean(token && token !== "your_mapbox_token_here");
   const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? mapStyleTemplates[0];
   const latestAnalysisRef = useRef(analysis);
-  const latestDebugModeRef = useRef(debugMode);
-  const latestInspectorTargetRef = useRef(inspectorTarget);
 
   const activeProfiles = useMemo(
     () => analysis.profiles.filter((profile) => analysis.selectedProfileIds.includes(profile.id)),
@@ -224,10 +201,6 @@ export function App() {
   const effectiveCalculationRadiusM = useMemo(
     () => analysisRadiusM(analysis, debugMode),
     [analysis, debugMode],
-  );
-  const effectiveTextureSize = useMemo(
-    () => coverageTextureSizeFor(effectiveCalculationRadiusM, analysis.gridResolutionM),
-    [analysis.gridResolutionM, effectiveCalculationRadiusM],
   );
 
   useEffect(() => {
@@ -241,6 +214,7 @@ export function App() {
       pitch: 0,
       bearing: 0,
       antialias: true,
+      preserveDrawingBuffer: true,
     });
     map.dragRotate.disable();
     map.touchZoomRotate.disableRotation();
@@ -287,20 +261,17 @@ export function App() {
         placeOperator(event.lngLat);
         return;
       }
-      setInspectorTarget({ lng: event.lngLat.lng, lat: event.lngLat.lat });
+      setInspectorTarget({
+        lng: event.lngLat.lng,
+        lat: event.lngLat.lat,
+      });
     });
 
     map.on("load", () => {
-      installAnalysisLayers(map, analysis, debugMode, layerRef);
-    });
-    map.on("idle", () => {
-      if (latestInspectorTargetRef.current) {
-        setMapDataRevision((revision) => revision + 1);
-      }
+      installAnalysisLayers(map, analysis);
     });
 
     return () => {
-      layerRef.current = null;
       markerRef.current?.remove();
       map.remove();
       mapRef.current = null;
@@ -308,47 +279,38 @@ export function App() {
   }, [hasToken]);
 
   useEffect(() => {
-    latestInspectorTargetRef.current = inspectorTarget;
-  }, [inspectorTarget]);
-
-  useEffect(() => {
     latestAnalysisRef.current = analysis;
     markerRef.current?.setLngLat([analysis.operator.lng, analysis.operator.lat]);
     if (mapRef.current?.isStyleLoaded()) {
       updateReferenceCircle(mapRef.current, analysis);
     }
-    layerRef.current?.setRequest(analysis);
   }, [analysis]);
-
-  useEffect(() => {
-    latestDebugModeRef.current = debugMode;
-    layerRef.current?.setDebugMode(debugMode);
-  }, [debugMode]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !hasToken) return;
     if (previousStyleUriRef.current === selectedStyle.uri) return;
     previousStyleUriRef.current = selectedStyle.uri;
-    layerRef.current = null;
     map.setStyle(selectedStyle.uri);
     map.once("style.load", () =>
-      installAnalysisLayers(map, latestAnalysisRef.current, latestDebugModeRef.current, layerRef),
+      installAnalysisLayers(map, latestAnalysisRef.current),
     );
   }, [hasToken, selectedStyle.uri]);
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!inspectorTarget) {
+      setInspector(null);
+      return;
+    }
     setInspector(
-      inspectorTarget
-        ? map
-          ? inspectTerrainPixel(map, analysis, inspectorTarget, debugMode)
-          : inspectFlatEarthPixel(analysis, inspectorTarget, debugMode)
-        : null,
+      map
+        ? inspectTerrainPixel(map, analysis, inspectorTarget, debugMode)
+        : inspectFlatEarthPixel(analysis, inspectorTarget, debugMode),
     );
-  }, [analysis, debugMode, inspectorTarget, mapDataRevision]);
+  }, [analysis, debugMode, inspectorTarget]);
 
-  function setNumber(path: "radiusM" | "gridResolutionM", value: number) {
+  function setNumber(path: "radiusM", value: number) {
     setAnalysis((current) => ({ ...current, [path]: value }));
   }
 
@@ -388,16 +350,6 @@ export function App() {
         <div className="panel-title">
           <Antenna size={18} />
           <span>Range Calculator</span>
-          <button
-            type="button"
-            title="Resample terrain"
-            onClick={() => {
-              layerRef.current?.refreshSources();
-              setMapDataRevision((revision) => revision + 1);
-            }}
-          >
-            <RefreshCw size={16} />
-          </button>
         </div>
 
         <label>
@@ -559,23 +511,6 @@ export function App() {
               />
             </span>
             <output>Use Mapbox building heights as line-of-sight blockers</output>
-          </label>
-
-          <label>
-            Grid resolution
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              value={gridResolutionToSlider(analysis.gridResolutionM)}
-              onChange={(event) =>
-                setNumber("gridResolutionM", sliderToGridResolution(Number(event.target.value)))
-              }
-            />
-            <output>
-              {analysis.gridResolutionM} m cells, {effectiveTextureSize} x {effectiveTextureSize}
-            </output>
           </label>
         </details>
       </aside>

@@ -38,7 +38,7 @@ describe("single ray inspector", () => {
 
     expect(inspected.requiredAltitudeM).toBeGreaterThan(defaultAnalysis.altitude.minM);
     expect(inspected.reachable).toBe(false);
-    expect(inspected.violationCriteria).toBe("Max alt, Terrain");
+    expect(inspected.violationCriteria).toBe("Terrain");
   });
 
   it("uses Mapbox building blockers only when enabled", () => {
@@ -73,7 +73,40 @@ describe("single ray inspector", () => {
     expect(withoutBuildings.requiredAltitudeM).toBe(defaultAnalysis.altitude.minM);
     expect(withBuildings.requiredAltitudeM).toBeGreaterThan(withoutBuildings.requiredAltitudeM);
     expect(withBuildings.reachable).toBe(false);
-    expect(withBuildings.violationCriteria).toBe("Max alt, Building");
+    expect(withBuildings.violationCriteria).toBe("Building");
+  });
+
+  it("distinguishes manual range cutoffs from RF-derived auto limits", () => {
+    const target = {
+      lng: defaultAnalysis.operator.lng + 0.01,
+      lat: defaultAnalysis.operator.lat,
+    };
+    const manualRange = inspectTerrainPixel(
+      flatMap,
+      {
+        ...defaultAnalysis,
+        calculationRange: { mode: "manual", manualM: 250 },
+      },
+      target,
+      "combined",
+    );
+    const autoRf = inspectTerrainPixel(
+      flatMap,
+      {
+        ...defaultAnalysis,
+        profiles: defaultAnalysis.profiles.map((profile) => ({
+          ...profile,
+          txPowerDbm: -100,
+          rxSensitivityDbm: -50,
+        })),
+        calculationRange: { mode: "auto", manualM: 5000 },
+      },
+      target,
+      "combined",
+    );
+
+    expect(manualRange.violationCriteria).toBe("Range");
+    expect(autoRf.violationCriteria).toBe("RF");
   });
 
   it("reports signed minimum elevation change relative to operator altitude", () => {

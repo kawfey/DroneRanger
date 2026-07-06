@@ -44,7 +44,7 @@ function selectedProfilesForMode(
   request: AnalysisRequest,
   debugMode: DebugMode,
 ): LinkProfile[] {
-  if (debugMode === "los" || debugMode === "blocker" || debugMode === "shademap") {
+  if (debugMode === "los" || debugMode === "blocker") {
     return [];
   }
   const modeProfile = profileForMode(request, debugMode);
@@ -54,8 +54,8 @@ function selectedProfilesForMode(
   return request.profiles.filter((profile) => request.selectedProfileIds.includes(profile.id));
 }
 
-function analysisRadiusM(request: AnalysisRequest, debugMode: DebugMode): number {
-  if (debugMode === "los" || debugMode === "blocker" || debugMode === "shademap") {
+export function analysisRadiusM(request: AnalysisRequest, debugMode: DebugMode): number {
+  if (debugMode === "los" || debugMode === "blocker") {
     return request.radiusM;
   }
   if (request.calculationRange.mode === "manual") {
@@ -86,11 +86,10 @@ export function inspectFlatEarthPixel(
   const modeMarginDb = modeProfile ? limitingMarginDb(distanceM, [modeProfile]) : null;
   const activeMarginDb = activeProfiles.length > 0 ? limitingMarginDb(distanceM, activeProfiles) : 0;
   const activeRadiusM = analysisRadiusM(request, debugMode);
-  const criteria = baseViolationCriteria(request, distanceM, activeRadiusM, activeMarginDb);
+  const criteria = baseViolationCriteria(request, debugMode, distanceM, activeRadiusM, activeMarginDb);
   const reachable = criteria.size === 0;
   const operatorAbsM = request.operator.antennaHeightM;
   const targetAbsM = request.altitude.minM;
-
   return {
     requiredAltitudeM: targetAbsM,
     requiredElevationChangeM: targetAbsM - operatorAbsM,
@@ -140,17 +139,17 @@ export function inspectTerrainPixel(
   const requiredAltitudeM = requiredTargetAbsM - targetTerrain;
   const criteria = criteriaFromLabel(pixel.violationCriteria);
   if (requiredAltitudeM > request.altitude.maxM) {
-    criteria.add("Max alt");
     criteria.add(limitingObstacle === "building" ? "Building" : "Terrain");
   }
 
+  const reachable = criteria.size === 0;
   return {
     ...pixel,
     requiredAltitudeM,
     requiredElevationChangeM: requiredTargetAbsM - operatorAbsM,
     operatorAltitudeAslM: operatorAbsM,
     violationCriteria: criteriaLabel(criteria),
-    reachable: criteria.size === 0,
+    reachable,
   };
 }
 
@@ -196,22 +195,22 @@ function obstacleElevation(
 
 function baseViolationCriteria(
   request: AnalysisRequest,
+  debugMode: DebugMode,
   distanceM: number,
   activeRadiusM: number,
   activeMarginDb: number,
 ): Set<string> {
   const criteria = new Set<string>();
-  if (request.altitude.minM > request.altitude.maxM) {
-    criteria.add("Min alt");
-    criteria.add("Max alt");
-  }
   if (distanceM > activeRadiusM) {
-    criteria.add("Range");
-  }
-  if (activeMarginDb < 0) {
+    criteria.add(request.calculationRange.mode === "auto" && isRfMode(debugMode) ? "RF" : "Range");
+  } else if (activeMarginDb < 0) {
     criteria.add("RF");
   }
   return criteria;
+}
+
+function isRfMode(debugMode: DebugMode): boolean {
+  return debugMode !== "los" && debugMode !== "blocker";
 }
 
 function criteriaFromLabel(label: string): Set<string> {

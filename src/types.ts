@@ -32,7 +32,6 @@ export type AnalysisRequest = {
     antennaHeightM: number;
   };
   radiusM: number;
-  gridResolutionM: number;
   calculationRange: CalculationRange;
   altitude: {
     minM: number;
@@ -50,8 +49,7 @@ export type DebugMode =
   | "telemetry"
   | "video"
   | "los"
-  | "blocker"
-  | "shademap";
+  | "blocker";
 
 export type CoveragePixel = {
   requiredAltitudeM: number;
