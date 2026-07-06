@@ -400,7 +400,6 @@ export function App() {
       renderSequence: coverageRenderSeqRef.current,
       engine: coverageEngine,
       preferredEngine: preferredCoverageEngine,
-      gpuStats: window.__droneRangeDebug?.gpuStats ?? null,
       hasCoverageSource: Boolean(map?.getSource("los-coverage")),
       sourceType: map ? getCoverageSourceType(map) : null,
       sourceTypeCounts: map ? getStyleSourceTypeCounts(map) : {},
@@ -512,7 +511,6 @@ export function App() {
             applyCoverageOverlay(map, image);
             updateDebugState({
               engine: image.engine,
-              gpuStats: image.engine === "gpu" ? gpuCoverage.debugStats() : null,
             });
             setCoverageEngine(image.engine);
             return;
@@ -534,7 +532,6 @@ export function App() {
       renderSequence: coverageRenderSeqRef.current,
       engine: "cpu-fallback",
       preferredEngine: preferredCoverageEngine,
-      gpuStats: null,
       hasCoverageSource: Boolean(map.getSource("los-coverage")),
       sourceType: getCoverageSourceType(map),
       sourceTypeCounts: getStyleSourceTypeCounts(map),

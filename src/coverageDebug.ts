@@ -1,7 +1,6 @@
 import type mapboxgl from "mapbox-gl";
 import { analysisRadiusM } from "./analysis/singleRay";
 import { lngLatToMercator01, mercator01ToLngLat } from "./analysis/coordinates";
-import type { GpuCoverageDebugStats } from "./gpuCoverageLayer";
 import type { AnalysisRequest, CoverageCoordinates, CoverageEngine, DebugMode } from "./types";
 
 export type ReferenceCircleFeature = {
@@ -21,7 +20,6 @@ export type DroneRangeDebugState = {
   renderSequence: number;
   engine: CoverageEngine;
   preferredEngine: CoverageEngine;
-  gpuStats: GpuCoverageDebugStats | null;
   hasCoverageSource: boolean;
   sourceType: string | null;
   sourceTypeCounts: Record<string, number>;

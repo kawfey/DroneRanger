@@ -37,21 +37,6 @@ type DecodedTile = {
   elevations: Float32Array;
 };
 
-export type GpuCoverageDebugStats = {
-  demZoom: number | null;
-  demTileCount: number;
-  heightTexturePx: number;
-  coverageGridPx: number;
-  heightMinM: number;
-  heightMaxM: number;
-  heightMeanM: number;
-  requiredAltitudeMinM: number;
-  requiredAltitudeMaxM: number;
-  reachableCount: number;
-  coveredCount: number;
-  pixelCount: number;
-};
-
 const vertexShaderSource = `#version 300 es
 layout(location = 0) in vec2 a_position;
 out vec2 v_uv;
@@ -363,54 +348,6 @@ export class GpuCoverageLayer {
       renderedOperator: this.analysis.operator,
       requiredAltitudeM,
       reachable: reachableData,
-    };
-  }
-
-  debugStats(): GpuCoverageDebugStats | null {
-    if (!this.heightData) {
-      return null;
-    }
-    const numeric = this.readNumericCoverage();
-    let heightMinM = Infinity;
-    let heightMaxM = -Infinity;
-    let heightSumM = 0;
-    for (const height of this.heightData) {
-      heightMinM = Math.min(heightMinM, height);
-      heightMaxM = Math.max(heightMaxM, height);
-      heightSumM += height;
-    }
-
-    let requiredAltitudeMinM = Infinity;
-    let requiredAltitudeMaxM = -Infinity;
-    let reachableCount = 0;
-    let coveredCount = 0;
-    for (let index = 0; index < numeric.length; index += 4) {
-      const requiredAltitudeM = numeric[index] ?? 0;
-      const reachable = (numeric[index + 1] ?? 0) >= 0.5;
-      const inRange = (numeric[index + 2] ?? 0) >= 0.5;
-      if (inRange) {
-        coveredCount++;
-        requiredAltitudeMinM = Math.min(requiredAltitudeMinM, requiredAltitudeM);
-        requiredAltitudeMaxM = Math.max(requiredAltitudeMaxM, requiredAltitudeM);
-      }
-      if (reachable && inRange) {
-        reachableCount++;
-      }
-    }
-
-    return {
-      demZoom: this.demZoom,
-      demTileCount: this.demTileCount,
-      heightTexturePx: this.options.texturePx,
-      coverageGridPx: this.canvas.width,
-      heightMinM,
-      heightMaxM,
-      heightMeanM: heightSumM / this.heightData.length,
-      requiredAltitudeMinM,
-      requiredAltitudeMaxM,
-      reachableCount,
-      coveredCount,
-      pixelCount: this.canvas.width * this.canvas.height,
     };
   }
 
