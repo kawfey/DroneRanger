@@ -308,7 +308,20 @@ function stylePreviewUrl(style: MapStyleTemplate): string {
   return `https://api.mapbox.com/styles/v1/${path}/static/-3.7038,40.4168,11,0/104x104?access_token=${token}`;
 }
 
-export function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisRequest, debugMode: DebugMode): void {
+function shouldUseMapboxTerrain(analysis: AnalysisRequest, preferredEngine: CoverageEngine): boolean {
+  return preferredEngine !== "gpu" || analysis.includeBuildings;
+}
+
+function setMapboxTerrainEnabled(map: mapboxgl.Map, enabled: boolean): void {
+  map.setTerrain(enabled ? { source: "mapbox-dem", exaggeration: 1 } : null);
+}
+
+export function installAnalysisLayers(
+  map: mapboxgl.Map,
+  analysis: AnalysisRequest,
+  debugMode: DebugMode,
+  terrainEnabled = true,
+): void {
   if (!map.getSource("mapbox-dem")) {
     map.addSource("mapbox-dem", {
       type: "raster-dem",
@@ -317,7 +330,7 @@ export function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisReque
       maxzoom: 14,
     });
   }
-  map.setTerrain({ source: "mapbox-dem", exaggeration: 1 });
+  setMapboxTerrainEnabled(map, terrainEnabled);
 
   if (map.getSource("composite") && !map.getLayer("los-building-reference")) {
     map.addLayer({
@@ -395,7 +408,7 @@ export function App() {
   const [inspectorTarget, setInspectorTarget] = useState<InspectorTarget | null>(null);
   const [mapDataRevision, setMapDataRevision] = useState(0);
   const [coverageEngine, setCoverageEngine] = useState<CoverageEngine>("cpu-fallback");
-  const [preferredCoverageEngine, setPreferredCoverageEngine] = useState<CoverageEngine>("cpu-fallback");
+  const [preferredCoverageEngine, setPreferredCoverageEngine] = useState<CoverageEngine>("gpu");
   const [selectedStyleId, setSelectedStyleId] = useState(mapStyleTemplates[0].id);
   const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
   const hasToken = Boolean(token && token !== "your_mapbox_token_here");
@@ -505,6 +518,7 @@ export function App() {
 
   async function refreshCoverageLayer(map: mapboxgl.Map, nextAnalysis: AnalysisRequest, nextDebugMode: DebugMode) {
     const sequence = ++coverageRenderSeqRef.current;
+    setMapboxTerrainEnabled(map, shouldUseMapboxTerrain(nextAnalysis, preferredCoverageEngine));
     if (!nextAnalysis.includeBuildings && token) {
       try {
         const mapboxToken = token;
@@ -533,6 +547,7 @@ export function App() {
         }
       } catch (error) {
         console.warn("Shared terrain coverage renderer failed; falling back to Mapbox CPU coverage.", error);
+        setMapboxTerrainEnabled(map, true);
       }
     }
 
@@ -629,7 +644,7 @@ export function App() {
     });
 
     map.on("load", () => {
-      installAnalysisLayers(map, analysis, debugMode);
+      installAnalysisLayers(map, analysis, debugMode, shouldUseMapboxTerrain(analysis, preferredCoverageEngine));
       updateDebugState({
         sourceType: getCoverageSourceType(map),
         referenceCircle: referenceCircleFeature(latestAnalysisRef.current.operator, latestAnalysisRef.current.radiusM),
@@ -686,7 +701,12 @@ export function App() {
     previousStyleUriRef.current = selectedStyle.uri;
     map.setStyle(selectedStyle.uri);
     map.once("style.load", () => {
-      installAnalysisLayers(map, latestAnalysisRef.current, debugMode);
+      installAnalysisLayers(
+        map,
+        latestAnalysisRef.current,
+        debugMode,
+        shouldUseMapboxTerrain(latestAnalysisRef.current, preferredCoverageEngine),
+      );
       map.once("idle", () => {
         void refreshCoverageLayer(map, latestAnalysisRef.current, debugMode);
         setMapDataRevision((revision) => revision + 1);

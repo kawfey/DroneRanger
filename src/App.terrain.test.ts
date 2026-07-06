@@ -41,6 +41,28 @@ describe("terrain-backed coverage", () => {
     expect(setTerrain).not.toHaveBeenCalledWith(null);
   });
 
+  it("can install analysis layers without Mapbox terrain for GPU coverage panning", () => {
+    const addedSources: Record<string, unknown> = {};
+    const setTerrain = vi.fn();
+    const map = {
+      getSource: vi.fn((id: string) => addedSources[id]),
+      addSource: vi.fn((id: string, source: unknown) => {
+        addedSources[id] = source;
+      }),
+      setTerrain,
+      getLayer: vi.fn(() => undefined),
+      addLayer: vi.fn(),
+    };
+
+    installAnalysisLayers(map as never, defaultAnalysis, "combined", false);
+
+    expect(map.addSource).toHaveBeenCalledWith(
+      "mapbox-dem",
+      expect.objectContaining({ type: "raster-dem" }),
+    );
+    expect(setTerrain).toHaveBeenCalledWith(null);
+  });
+
   it("CPU coverage rendering uses terrain elevations from the sampler", () => {
     const analysis: AnalysisRequest = {
       ...defaultAnalysis,
