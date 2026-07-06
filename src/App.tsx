@@ -820,7 +820,10 @@ export function App() {
         }
         const gpuCoverage = gpuCoverageRef.current;
         if (gpuCoverage) {
-          await gpuCoverage.updateAnalysis(nextAnalysis, nextDebugMode);
+          const isCurrentGpuAnalysis = await gpuCoverage.updateAnalysis(nextAnalysis, nextDebugMode);
+          if (!isCurrentGpuAnalysis || sequence !== coverageRenderSeqRef.current) {
+            return;
+          }
           const image =
             preferredCoverageEngine === "gpu"
               ? gpuCoverage.render()

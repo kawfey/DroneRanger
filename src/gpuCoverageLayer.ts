@@ -277,6 +277,7 @@ export class GpuCoverageLayer {
   private demZoom: number | null = null;
   private demTileCount = 0;
   private lastUpdateTimings: Partial<CoverageTimings> = {};
+  private updateVersion = 0;
 
   static create(options: GpuCoverageLayerOptions): GpuCoverageLayer | null {
     const canvas = document.createElement("canvas");
@@ -319,7 +320,8 @@ export class GpuCoverageLayer {
     this.initGeometry(this.colorProgram);
   }
 
-  async updateAnalysis(analysis: AnalysisRequest, debugMode: DebugMode): Promise<void> {
+  async updateAnalysis(analysis: AnalysisRequest, debugMode: DebugMode): Promise<boolean> {
+    const updateVersion = ++this.updateVersion;
     const startedAt = performance.now();
     this.analysis = analysis;
     this.debugMode = debugMode;
@@ -345,24 +347,32 @@ export class GpuCoverageLayer {
 
     if (signature === this.demSignature) {
       this.lastUpdateTimings = { updateAnalysisMs: performance.now() - startedAt };
-      return;
+      return true;
     }
 
-    this.demSignature = signature;
     const demBuildStartedAt = performance.now();
-    this.bounds = bounds;
-    this.heightData = await this.buildHeightTexture(bounds, z);
+    const heightData = await this.buildHeightTexture(bounds, z);
+    if (updateVersion !== this.updateVersion) {
+      return false;
+    }
     let buildingBuildMs: number | undefined;
+    let obstacleData: Float32Array | null = null;
     if (analysis.includeBuildings) {
       const buildingBuildStartedAt = performance.now();
-      this.obstacleData = await this.buildObstacleTexture(bounds, this.heightData);
+      obstacleData = await this.buildObstacleTexture(bounds, heightData);
+      if (updateVersion !== this.updateVersion) {
+        return false;
+      }
       buildingBuildMs = performance.now() - buildingBuildStartedAt;
-    } else {
-      this.obstacleData = null;
     }
     const demBuildMs = performance.now() - demBuildStartedAt;
     const demUploadStartedAt = performance.now();
-    this.uploadHeightTexture(this.heightData, this.obstacleData);
+    this.bounds = bounds;
+    this.heightData = heightData;
+    this.obstacleData = obstacleData;
+    this.demSignature = signature;
+    this.demZoom = z;
+    this.uploadHeightTexture(heightData, obstacleData);
     const demUploadMs = performance.now() - demUploadStartedAt;
     this.lastUpdateTimings = {
       demBuildMs,
@@ -370,6 +380,7 @@ export class GpuCoverageLayer {
       demUploadMs,
       updateAnalysisMs: performance.now() - startedAt,
     };
+    return true;
   }
 
   updateHeightFieldForValidation(
