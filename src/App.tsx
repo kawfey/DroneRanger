@@ -32,6 +32,7 @@ import {
 import {
   auditCoverageFootprint,
   canvasFingerprint,
+  type CoverageBenchmarkResult,
   getCoverageSourceType,
   getStyleSourceTypeCounts,
   inspectCoverageCanvasAt,
@@ -83,6 +84,7 @@ type InspectorTarget = {
 };
 
 const gpuHeightTexturePx = 768;
+let coverageSourceCanvas: HTMLCanvasElement | null = null;
 
 function profileLabel(id: LinkProfileId): string {
   return id[0].toUpperCase() + id.slice(1);
@@ -176,6 +178,7 @@ export function renderCoverageImage(
   debugMode: DebugMode,
   displayCanvas: HTMLCanvasElement,
 ): CoverageOverlay {
+  const startedAt = performance.now();
   const radiusM = analysisRadiusM(analysis, debugMode);
   const spec = createCoverageGridSpec(analysis, debugMode);
   const gridSize = clampGridSize(analysis.gridSizePx);
@@ -215,6 +218,7 @@ export function renderCoverageImage(
     }
   }
   context.putImageData(imageData, 0, 0);
+  const totalMs = performance.now() - startedAt;
 
   return {
     canvas: displayCanvas,
@@ -222,6 +226,10 @@ export function renderCoverageImage(
     gridSizePx: gridSize,
     engine: "cpu-fallback",
     renderedOperator: analysis.operator,
+    timings: {
+      totalMs,
+      cpuSolveMs: totalMs,
+    },
   };
 }
 
@@ -241,14 +249,16 @@ function ensureCoverageCanvasSource(
   const hasStaleTextureSize = existingSource
     ? isCanvasSource && (existingSource.width !== overlay.canvas.width || existingSource.height !== overlay.canvas.height)
     : false;
+  const hasStaleCanvas = Boolean(existingSource && coverageSourceCanvas && coverageSourceCanvas !== overlay.canvas);
 
   overlay.canvas.style.imageRendering = "pixelated";
 
-  if (existingSource && (!isCanvasSource || hasStaleTextureSize)) {
+  if (existingSource && (!isCanvasSource || hasStaleTextureSize || hasStaleCanvas)) {
     if (map.getLayer("los-coverage")) {
       map.removeLayer("los-coverage");
     }
     map.removeSource("los-coverage");
+    coverageSourceCanvas = null;
   }
 
   const canvasSource = map.getSource("los-coverage") as
@@ -262,6 +272,7 @@ function ensureCoverageCanvasSource(
       coordinates: overlay.coordinates,
       animate: false,
     });
+    coverageSourceCanvas = overlay.canvas;
   } else if (typeof canvasSource.setCoordinates === "function") {
     canvasSource.setCoordinates(overlay.coordinates);
   }
@@ -438,6 +449,7 @@ export function App() {
             lat: markerRef.current.getLngLat().lat,
           }
         : null,
+      lastCoverageTimings: window.__droneRangeDebug?.lastCoverageTimings ?? null,
       ...patch,
     };
     window.__inspectCoverageAt = (lng: number, lat: number) =>
@@ -457,6 +469,47 @@ export function App() {
         window.__droneRangeDebug?.engine ?? coverageEngine,
         window.__droneRangeDebug?.preferredEngine ?? preferredCoverageEngine,
       );
+    window.__benchmarkCoverageRender = async (gridSizes = [64, 128, 256, 384]) => {
+      if (!token) {
+        return [];
+      }
+      const layer = GpuCoverageLayer.create({
+        mapboxToken: token,
+        texturePx: gpuHeightTexturePx,
+        coordinatesForAnalysis: coverageImageCoordinates,
+      });
+      if (!layer) {
+        return [];
+      }
+      const results: CoverageBenchmarkResult[] = [];
+      try {
+        for (const gridSizePx of gridSizes) {
+          const request: AnalysisRequest = {
+            ...latestAnalysisRef.current,
+            gridSizePx,
+            includeBuildings: false,
+          };
+          await layer.updateAnalysis(request, debugMode);
+          const cpu = layer.renderCpuReference();
+          const gpu = layer.render(true);
+          const pixels = clampGridSize(gridSizePx) ** 2;
+          const cpuMs = cpu?.timings?.totalMs ?? null;
+          const gpuMs = gpu?.timings?.totalMs ?? null;
+          results.push({
+            gridSizePx: clampGridSize(gridSizePx),
+            pixels,
+            cpuMs,
+            gpuMs,
+            speedup: cpuMs !== null && gpuMs !== null && gpuMs > 0 ? cpuMs / gpuMs : null,
+            cpuPixelsPerMs: cpuMs && cpuMs > 0 ? pixels / cpuMs : null,
+            gpuPixelsPerMs: gpuMs && gpuMs > 0 ? pixels / gpuMs : null,
+          });
+        }
+      } finally {
+        layer.dispose();
+      }
+      return results;
+    };
   }
 
   function getCoverageDisplayCanvas(): HTMLCanvasElement {
@@ -472,8 +525,8 @@ export function App() {
   }
 
   function applyCoverageOverlay(map: mapboxgl.Map, overlay: CoverageOverlay): void {
-    const displayCanvas = getCoverageDisplayCanvas();
-    if (displayCanvas !== overlay.canvas) {
+    const displayCanvas = overlay.engine === "gpu" ? overlay.canvas : getCoverageDisplayCanvas();
+    if (overlay.engine !== "gpu" && displayCanvas !== overlay.canvas) {
       displayCanvas.width = overlay.gridSizePx;
       displayCanvas.height = overlay.gridSizePx;
       displayCanvas.style.imageRendering = "pixelated";
@@ -499,6 +552,7 @@ export function App() {
       renderSequence: coverageRenderSeqRef.current,
       engine: overlay.engine,
       preferredEngine: preferredCoverageEngine,
+      lastCoverageTimings: overlay.timings ?? null,
       hasCoverageSource: Boolean(map.getSource("los-coverage")),
       sourceType: getCoverageSourceType(map),
       sourceTypeCounts: getStyleSourceTypeCounts(map),
@@ -554,7 +608,8 @@ export function App() {
     if (sequence !== coverageRenderSeqRef.current) {
       return;
     }
-    updateCoverageLayer(map, nextAnalysis, nextDebugMode, getCoverageDisplayCanvas());
+    const cpuOverlay = renderCoverageImage(map, nextAnalysis, nextDebugMode, getCoverageDisplayCanvas());
+    ensureCoverageCanvasSource(map, cpuOverlay);
     updateDebugState({
       coverageCoordinates: coverageImageCoordinates(nextAnalysis.operator, analysisRadiusM(nextAnalysis, nextDebugMode)),
       coverageCanvasFingerprint: canvasFingerprint(getCoverageDisplayCanvas()),
@@ -562,6 +617,7 @@ export function App() {
       renderSequence: coverageRenderSeqRef.current,
       engine: "cpu-fallback",
       preferredEngine: preferredCoverageEngine,
+      lastCoverageTimings: cpuOverlay.timings ?? null,
       hasCoverageSource: Boolean(map.getSource("los-coverage")),
       sourceType: getCoverageSourceType(map),
       sourceTypeCounts: getStyleSourceTypeCounts(map),

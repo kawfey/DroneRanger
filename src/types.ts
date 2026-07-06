@@ -62,6 +62,19 @@ export type CoverageOverlay = {
   gridSizePx: number;
   engine: CoverageEngine;
   renderedOperator: AnalysisRequest["operator"];
+  timings?: CoverageTimings;
+};
+
+export type CoverageTimings = {
+  totalMs: number;
+  updateAnalysisMs?: number;
+  renderMs?: number;
+  demBuildMs?: number;
+  demUploadMs?: number;
+  cpuSolveMs?: number;
+  cpuShadeMs?: number;
+  gpuDrawMs?: number;
+  gpuReadbackMs?: number;
 };
 
 export type CoverageGridData = {

@@ -1,7 +1,7 @@
 import type mapboxgl from "mapbox-gl";
 import { analysisRadiusM } from "./analysis/singleRay";
 import { lngLatToMercator01, mercator01ToLngLat } from "./analysis/coordinates";
-import type { AnalysisRequest, CoverageCoordinates, CoverageEngine, DebugMode } from "./types";
+import type { AnalysisRequest, CoverageCoordinates, CoverageEngine, CoverageTimings, DebugMode } from "./types";
 
 export type ReferenceCircleFeature = {
   type: "Feature";
@@ -25,6 +25,7 @@ export type DroneRangeDebugState = {
   sourceTypeCounts: Record<string, number>;
   referenceCircle: ReferenceCircleFeature | null;
   markerLngLat: { lng: number; lat: number } | null;
+  lastCoverageTimings: CoverageTimings | null;
 };
 
 export type CoverageInspection = {
@@ -92,11 +93,22 @@ export type CoverageFootprintAudit = {
   layerPaint: Record<string, unknown> | null;
 };
 
+export type CoverageBenchmarkResult = {
+  gridSizePx: number;
+  pixels: number;
+  cpuMs: number | null;
+  gpuMs: number | null;
+  speedup: number | null;
+  cpuPixelsPerMs: number | null;
+  gpuPixelsPerMs: number | null;
+};
+
 declare global {
   interface Window {
     __droneRangeDebug?: DroneRangeDebugState;
     __inspectCoverageAt?: (lng: number, lat: number) => CoverageInspection;
     __auditCoverageFootprint?: () => CoverageFootprintAudit;
+    __benchmarkCoverageRender?: (gridSizes?: number[]) => Promise<CoverageBenchmarkResult[]>;
   }
 }
 

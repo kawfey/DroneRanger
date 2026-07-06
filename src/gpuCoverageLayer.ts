@@ -21,6 +21,7 @@ import type {
   CoverageCoordinates,
   CoverageGridData,
   CoverageOverlay,
+  CoverageTimings,
   DebugMode,
   LinkProfile,
 } from "./types";
@@ -78,22 +79,19 @@ float heightAt(vec2 uv) {
   float h10 = texture(u_height, uv10).r;
   float h01 = texture(u_height, uv01).r;
   float h11 = texture(u_height, uv11).r;
-  return mix(mix(h00, h10, fracPart.x), mix(h01, h11, fracPart.x), fracPart.y);
+    return mix(mix(h00, h10, fracPart.x), mix(h01, h11, fracPart.x), fracPart.y);
 }
 
-void main() {
-  vec2 terrainUv = vec2(v_uv.x, 1.0 - v_uv.y);
+vec4 solveCoverage(vec2 terrainUv) {
   vec2 circle = terrainUv * 2.0 - 1.0;
   if (dot(circle, circle) > 1.0) {
-    outData = vec4(0.0, 0.0, 0.0, 0.0);
-    return;
+    return vec4(0.0, 0.0, 0.0, 0.0);
   }
 
   float distanceM = length(circle) * u_radiusM;
   float rangePass = distanceM <= u_maxReachM ? 1.0 : 0.0;
   if (distanceM > u_maxReachM) {
-    outData = vec4(u_maxAltitudeM + 1.0, 0.0, rangePass, distanceM);
-    return;
+    return vec4(u_maxAltitudeM + 1.0, 0.0, rangePass, distanceM);
   }
 
   float operatorAbsM = heightAt(u_operatorUv) + u_antennaHeightM;
@@ -112,13 +110,124 @@ void main() {
 
   float requiredAltitudeM = requiredTargetAbsM - operatorAbsM;
   float reachable = requiredAltitudeM <= u_maxAltitudeM ? 1.0 : 0.0;
-  outData = vec4(requiredAltitudeM, reachable, rangePass, distanceM);
+  return vec4(requiredAltitudeM, reachable, rangePass, distanceM);
+}
+
+void main() {
+  vec2 terrainUv = vec2(v_uv.x, 1.0 - v_uv.y);
+  outData = solveCoverage(terrainUv);
+}`;
+
+const colorFragmentShaderSource = `#version 300 es
+precision highp float;
+
+uniform sampler2D u_height;
+uniform float u_heightTexturePx;
+uniform vec2 u_operatorUv;
+uniform float u_antennaHeightM;
+uniform float u_minAltitudeM;
+uniform float u_maxAltitudeM;
+uniform float u_altitudeStepM;
+uniform float u_radiusM;
+uniform float u_maxReachM;
+uniform int u_raySteps;
+uniform int u_debugMode;
+
+in vec2 v_uv;
+out vec4 outColor;
+
+float heightAt(vec2 uv) {
+  vec2 clampedUv = clamp(uv, vec2(0.0), vec2(1.0));
+  vec2 pixel = clampedUv * u_heightTexturePx - 0.5;
+  vec2 base = floor(pixel);
+  vec2 fracPart = pixel - base;
+  vec2 maxPixel = vec2(u_heightTexturePx - 1.0);
+  vec2 p00 = clamp(base, vec2(0.0), maxPixel);
+  vec2 p11 = clamp(base + vec2(1.0), vec2(0.0), maxPixel);
+  vec2 uv00 = (p00 + 0.5) / u_heightTexturePx;
+  vec2 uv10 = (vec2(p11.x, p00.y) + 0.5) / u_heightTexturePx;
+  vec2 uv01 = (vec2(p00.x, p11.y) + 0.5) / u_heightTexturePx;
+  vec2 uv11 = (p11 + 0.5) / u_heightTexturePx;
+  float h00 = texture(u_height, uv00).r;
+  float h10 = texture(u_height, uv10).r;
+  float h01 = texture(u_height, uv01).r;
+  float h11 = texture(u_height, uv11).r;
+  return mix(mix(h00, h10, fracPart.x), mix(h01, h11, fracPart.x), fracPart.y);
+}
+
+vec4 solveCoverage(vec2 terrainUv) {
+  vec2 circle = terrainUv * 2.0 - 1.0;
+  if (dot(circle, circle) > 1.0) {
+    return vec4(0.0, 0.0, 0.0, 0.0);
+  }
+
+  float distanceM = length(circle) * u_radiusM;
+  float rangePass = distanceM <= u_maxReachM ? 1.0 : 0.0;
+  if (distanceM > u_maxReachM) {
+    return vec4(u_maxAltitudeM + 1.0, 0.0, rangePass, distanceM);
+  }
+
+  float operatorAbsM = heightAt(u_operatorUv) + u_antennaHeightM;
+  float targetTerrainM = heightAt(terrainUv);
+  float requiredTargetAbsM = max(operatorAbsM + u_minAltitudeM, targetTerrainM + u_minAltitudeM);
+
+  for (int step = 1; step < 128; step++) {
+    if (step >= u_raySteps) {
+      break;
+    }
+    float t = float(step) / float(u_raySteps);
+    vec2 sampleUv = mix(u_operatorUv, terrainUv, t);
+    float obstacleM = heightAt(sampleUv);
+    requiredTargetAbsM = max(requiredTargetAbsM, operatorAbsM + (obstacleM - operatorAbsM) / max(t, 0.001));
+  }
+
+  float requiredAltitudeM = requiredTargetAbsM - operatorAbsM;
+  float reachable = requiredAltitudeM <= u_maxAltitudeM ? 1.0 : 0.0;
+  return vec4(requiredAltitudeM, reachable, rangePass, distanceM);
+}
+
+vec3 altitudeColor(float requiredAltitudeM) {
+  float span = max(0.001, u_maxAltitudeM - u_minAltitudeM);
+  float altitudeStepM = max(0.001, abs(u_altitudeStepM));
+  float steppedAltitudeM = u_minAltitudeM + ceil((requiredAltitudeM - u_minAltitudeM) / altitudeStepM) * altitudeStepM;
+  float t = clamp((steppedAltitudeM - u_minAltitudeM) / span, 0.0, 1.0);
+  vec3 green = vec3(31.0, 184.0, 88.0) / 255.0;
+  vec3 yellow = vec3(247.0, 220.0, 72.0) / 255.0;
+  vec3 orange = vec3(242.0, 143.0, 44.0) / 255.0;
+  vec3 red = vec3(220.0, 54.0, 46.0) / 255.0;
+  if (t <= 0.5) {
+    return mix(green, yellow, t / 0.5);
+  }
+  if (t <= 0.75) {
+    return mix(yellow, orange, (t - 0.5) / 0.25);
+  }
+  return mix(orange, red, (t - 0.75) / 0.25);
+}
+
+void main() {
+  vec2 terrainUv = vec2(v_uv.x, 1.0 - v_uv.y);
+  vec4 coverage = solveCoverage(terrainUv);
+  float reachable = coverage.y * coverage.z;
+  if (coverage.w <= 0.0 && coverage.x == 0.0 && coverage.y == 0.0) {
+    outColor = vec4(0.0);
+    return;
+  }
+  if (u_debugMode == 4) {
+    outColor = reachable >= 0.5 ? vec4(28.0 / 255.0, 132.0 / 255.0, 1.0, 178.0 / 255.0) : vec4(1.0, 1.0, 1.0, 150.0 / 255.0);
+    return;
+  }
+  if (reachable < 0.5) {
+    outColor = vec4(0.0);
+    return;
+  }
+  outColor = vec4(altitudeColor(coverage.x), 178.0 / 255.0);
 }`;
 
 export class GpuCoverageLayer {
   private readonly canvas: HTMLCanvasElement;
   private readonly gl: WebGL2RenderingContext;
   private readonly numericProgram: WebGLProgram;
+  private readonly colorProgram: WebGLProgram;
   private readonly heightTexture: WebGLTexture;
   private readonly numericTexture: WebGLTexture;
   private readonly numericFramebuffer: WebGLFramebuffer;
@@ -132,6 +241,7 @@ export class GpuCoverageLayer {
   private demSignature = "";
   private demZoom: number | null = null;
   private demTileCount = 0;
+  private lastUpdateTimings: Partial<CoverageTimings> = {};
 
   static create(options: GpuCoverageLayerOptions): GpuCoverageLayer | null {
     const canvas = document.createElement("canvas");
@@ -156,6 +266,7 @@ export class GpuCoverageLayer {
     this.canvas.width = options.texturePx;
     this.canvas.height = options.texturePx;
     this.numericProgram = createProgram(gl, vertexShaderSource, numericFragmentShaderSource);
+    this.colorProgram = createProgram(gl, vertexShaderSource, colorFragmentShaderSource);
     const texture = gl.createTexture();
     const numericTexture = gl.createTexture();
     const numericFramebuffer = gl.createFramebuffer();
@@ -168,10 +279,12 @@ export class GpuCoverageLayer {
     this.cpuCanvas = document.createElement("canvas");
     this.gpuCanvas = document.createElement("canvas");
     this.initNumericTarget();
-    this.initGeometry();
+    this.initGeometry(this.numericProgram);
+    this.initGeometry(this.colorProgram);
   }
 
   async updateAnalysis(analysis: AnalysisRequest, debugMode: DebugMode): Promise<void> {
+    const startedAt = performance.now();
     this.analysis = analysis;
     this.debugMode = debugMode;
     const gridSize = clampGridSize(analysis.gridSizePx);
@@ -194,13 +307,23 @@ export class GpuCoverageLayer {
     ].join(":");
 
     if (signature === this.demSignature) {
+      this.lastUpdateTimings = { updateAnalysisMs: performance.now() - startedAt };
       return;
     }
 
     this.demSignature = signature;
+    const demBuildStartedAt = performance.now();
     this.bounds = bounds;
     this.heightData = await this.buildHeightTexture(bounds, z);
+    const demBuildMs = performance.now() - demBuildStartedAt;
+    const demUploadStartedAt = performance.now();
     this.uploadHeightTexture(this.heightData);
+    const demUploadMs = performance.now() - demUploadStartedAt;
+    this.lastUpdateTimings = {
+      demBuildMs,
+      demUploadMs,
+      updateAnalysisMs: performance.now() - startedAt,
+    };
   }
 
   updateHeightFieldForValidation(
@@ -225,49 +348,57 @@ export class GpuCoverageLayer {
     this.uploadHeightTexture(elevations);
   }
 
-  render(): CoverageOverlay | null {
+  render(waitForCompletion = false): CoverageOverlay | null {
     if (!this.analysis || !this.bounds || !this.heightData) {
       return null;
     }
 
     const gl = this.gl;
+    const startedAt = performance.now();
     const radiusM = analysisRadiusM(this.analysis, this.debugMode);
-    const operatorUv = createCoverageGridSpec(this.analysis, this.debugMode).operatorUv;
 
     gl.disable(gl.SCISSOR_TEST);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.numericFramebuffer);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.useProgram(this.numericProgram);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.heightTexture);
-    setUniform1i(gl, this.numericProgram, "u_height", 0);
-    setUniform1f(gl, this.numericProgram, "u_heightTexturePx", this.options.texturePx);
-    setUniform2f(gl, this.numericProgram, "u_operatorUv", operatorUv.u, operatorUv.v);
-    setUniform1f(gl, this.numericProgram, "u_antennaHeightM", this.analysis.operator.antennaHeightM);
-    setUniform1f(gl, this.numericProgram, "u_minAltitudeM", this.analysis.altitude.minM);
-    setUniform1f(gl, this.numericProgram, "u_maxAltitudeM", this.analysis.altitude.maxM);
-    setUniform1f(gl, this.numericProgram, "u_radiusM", radiusM);
-    setUniform1f(gl, this.numericProgram, "u_maxReachM", maxReachM(this.analysis, this.debugMode, radiusM));
-    setUniform1i(gl, this.numericProgram, "u_raySteps", coverageRaySteps);
+    this.bindCoverageUniforms(this.colorProgram, radiusM);
+    setUniform1f(gl, this.colorProgram, "u_altitudeStepM", this.analysis.altitude.stepM);
+    setUniform1i(gl, this.colorProgram, "u_debugMode", debugModeIndex(this.debugMode));
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    gl.flush();
-
-    const data = this.readGpuCoverageData();
-    if (!data) {
-      return null;
+    if (waitForCompletion) {
+      gl.finish();
+    } else {
+      gl.flush();
     }
-    return plotCoverageGridData(data, this.analysis, this.gpuCanvas, this.debugMode);
+    const gpuDrawMs = performance.now() - startedAt;
+
+    return {
+      canvas: this.canvas,
+      coordinates: this.options.coordinatesForAnalysis(this.analysis.operator, radiusM),
+      gridSizePx: this.canvas.width,
+      engine: "gpu",
+      renderedOperator: this.analysis.operator,
+      timings: {
+        totalMs: gpuDrawMs,
+        ...this.lastUpdateTimings,
+        gpuDrawMs,
+      },
+    };
   }
 
   renderCpuReference(): CoverageOverlay | null {
+    const solveStartedAt = performance.now();
     const data = this.solveCpuReferenceData();
+    const cpuSolveMs = performance.now() - solveStartedAt;
     if (!data || !this.analysis) {
       return null;
     }
-    return plotCoverageGridData(data, this.analysis, this.cpuCanvas, this.debugMode);
+    return plotCoverageGridData(data, this.analysis, this.cpuCanvas, this.debugMode, {
+      ...this.lastUpdateTimings,
+      cpuSolveMs,
+    });
   }
 
   solveCpuReferenceData(): CoverageGridData | null {
@@ -304,6 +435,7 @@ export class GpuCoverageLayer {
 
   dispose(): void {
     this.gl.deleteProgram(this.numericProgram);
+    this.gl.deleteProgram(this.colorProgram);
     this.gl.deleteTexture(this.heightTexture);
     this.gl.deleteTexture(this.numericTexture);
     this.gl.deleteFramebuffer(this.numericFramebuffer);
@@ -311,10 +443,16 @@ export class GpuCoverageLayer {
 
   readNumericCoverage(): Float32Array {
     const gl = this.gl;
+    const startedAt = performance.now();
     const output = new Float32Array(this.canvas.width * this.canvas.height * 4);
+    this.renderNumericCoverage();
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.numericFramebuffer);
     gl.readPixels(0, 0, this.canvas.width, this.canvas.height, gl.RGBA, gl.FLOAT, output);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.lastUpdateTimings = {
+      ...this.lastUpdateTimings,
+      gpuReadbackMs: performance.now() - startedAt,
+    };
     return output;
   }
 
@@ -413,7 +551,43 @@ export class GpuCoverageLayer {
     return promise;
   }
 
-  private initGeometry(): void {
+  private renderNumericCoverage(): void {
+    if (!this.analysis) {
+      return;
+    }
+    const gl = this.gl;
+    const radiusM = analysisRadiusM(this.analysis, this.debugMode);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.numericFramebuffer);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    this.bindCoverageUniforms(this.numericProgram, radiusM);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.flush();
+  }
+
+  private bindCoverageUniforms(program: WebGLProgram, radiusM: number): void {
+    const gl = this.gl;
+    if (!this.analysis) {
+      return;
+    }
+    const operatorUv = createCoverageGridSpec(this.analysis, this.debugMode).operatorUv;
+    gl.useProgram(program);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.heightTexture);
+    setUniform1i(gl, program, "u_height", 0);
+    setUniform1f(gl, program, "u_heightTexturePx", this.options.texturePx);
+    setUniform2f(gl, program, "u_operatorUv", operatorUv.u, operatorUv.v);
+    setUniform1f(gl, program, "u_antennaHeightM", this.analysis.operator.antennaHeightM);
+    setUniform1f(gl, program, "u_minAltitudeM", this.analysis.altitude.minM);
+    setUniform1f(gl, program, "u_maxAltitudeM", this.analysis.altitude.maxM);
+    setUniform1f(gl, program, "u_radiusM", radiusM);
+    setUniform1f(gl, program, "u_maxReachM", maxReachM(this.analysis, this.debugMode, radiusM));
+    setUniform1i(gl, program, "u_raySteps", coverageRaySteps);
+  }
+
+  private initGeometry(program: WebGLProgram): void {
     const gl = this.gl;
     const buffer = gl.createBuffer();
     if (!buffer) {
@@ -425,7 +599,7 @@ export class GpuCoverageLayer {
       new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
       gl.STATIC_DRAW,
     );
-    const position = gl.getAttribLocation(this.numericProgram, "a_position");
+    const position = gl.getAttribLocation(program, "a_position");
     gl.enableVertexAttribArray(position);
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
   }
@@ -528,6 +702,10 @@ function selectedProfilesForMode(analysis: AnalysisRequest, debugMode: DebugMode
     return profile ? [profile] : [];
   }
   return analysis.profiles.filter((profile) => analysis.selectedProfileIds.includes(profile.id));
+}
+
+function debugModeIndex(debugMode: DebugMode): number {
+  return debugMode === "los" ? 4 : 0;
 }
 
 function createProgram(gl: WebGL2RenderingContext, vertexSource: string, fragmentSource: string): WebGLProgram {

@@ -1,12 +1,14 @@
 import { shadeLosReachability, shadeRequiredAltitude } from "./coverageShading";
-import type { AnalysisRequest, CoverageGridData, CoverageOverlay, DebugMode } from "../types";
+import type { AnalysisRequest, CoverageGridData, CoverageOverlay, CoverageTimings, DebugMode } from "../types";
 
 export function plotCoverageGridData(
   data: CoverageGridData,
   analysis: AnalysisRequest,
   canvas: HTMLCanvasElement,
   debugMode: DebugMode,
+  timings: Partial<CoverageTimings> = {},
 ): CoverageOverlay {
+  const startedAt = performance.now();
   canvas.width = data.gridSizePx;
   canvas.height = data.gridSizePx;
   const context = canvas.getContext("2d");
@@ -37,6 +39,7 @@ export function plotCoverageGridData(
     }
     context.putImageData(imageData, 0, 0);
   }
+  const cpuShadeMs = performance.now() - startedAt;
 
   return {
     canvas,
@@ -44,5 +47,10 @@ export function plotCoverageGridData(
     gridSizePx: data.gridSizePx,
     engine: data.engine,
     renderedOperator: data.renderedOperator,
+    timings: {
+      totalMs: (timings.cpuSolveMs ?? 0) + cpuShadeMs,
+      ...timings,
+      cpuShadeMs,
+    },
   };
 }
