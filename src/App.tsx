@@ -101,7 +101,7 @@ type InspectorTarget = {
   lat: number;
 };
 
-const gpuHeightTexturePx = 768;
+const gpuHeightTextureTiersPx = [128, 256, 384, 512, 768] as const;
 const coverageDisplayScale = 4;
 const map3dPitch = 55;
 let coverageSourceCanvas: HTMLCanvasElement | null = null;
@@ -126,6 +126,11 @@ function debugModeLabel(debugMode: DebugMode): string {
 
 function modeMarginLabel(debugMode: DebugMode): string {
   return `${debugModeLabel(debugMode)} margin`;
+}
+
+function gpuHeightTexturePxForGrid(gridSizePx: number): number {
+  const targetPx = clampGridSize(gridSizePx) * 2;
+  return gpuHeightTextureTiersPx.find((tier) => tier >= targetPx) ?? gpuHeightTextureTiersPx[gpuHeightTextureTiersPx.length - 1];
 }
 
 function updateProfile(
@@ -519,6 +524,7 @@ function operatorFromLngLat(
 export function App() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const gpuCoverageRef = useRef<GpuCoverageLayer | null>(null);
+  const gpuCoverageTexturePxRef = useRef<number | null>(null);
   const coverageDisplayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const coverageRenderSeqRef = useRef(0);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
@@ -591,17 +597,18 @@ export function App() {
       if (!token) {
         return [];
       }
-      const layer = GpuCoverageLayer.create({
-        mapboxToken: token,
-        texturePx: gpuHeightTexturePx,
-        coordinatesForAnalysis: coverageImageCoordinates,
-      });
-      if (!layer) {
-        return [];
-      }
       const results: CoverageBenchmarkResult[] = [];
-      try {
-        for (const gridSizePx of gridSizes) {
+      for (const gridSizePx of gridSizes) {
+        const texturePx = gpuHeightTexturePxForGrid(gridSizePx);
+        const layer = GpuCoverageLayer.create({
+          mapboxToken: token,
+          texturePx,
+          coordinatesForAnalysis: coverageImageCoordinates,
+        });
+        if (!layer) {
+          return results;
+        }
+        try {
           const request: AnalysisRequest = {
             ...latestAnalysisRef.current,
             gridSizePx,
@@ -622,9 +629,9 @@ export function App() {
             cpuPixelsPerMs: cpuMs && cpuMs > 0 ? pixels / cpuMs : null,
             gpuPixelsPerMs: gpuMs && gpuMs > 0 ? pixels / gpuMs : null,
           });
+        } finally {
+          layer.dispose();
         }
-      } finally {
-        layer.dispose();
       }
       return results;
     };
@@ -693,10 +700,11 @@ export function App() {
   function terrainFieldSignature(request: AnalysisRequest, mode: DebugMode): string {
     const radiusM = analysisRadiusM(request, mode);
     const bounds = analysisMercatorBounds(request, radiusM);
+    const texturePx = gpuHeightTexturePxForGrid(request.gridSizePx);
     const zoom = chooseDemZoom(request, radiusM);
     return [
       zoom,
-      gpuHeightTexturePx,
+      texturePx,
       bounds.west.toFixed(8),
       bounds.north.toFixed(8),
       bounds.east.toFixed(8),
@@ -728,9 +736,10 @@ export function App() {
     if (terrainFieldRef.current?.signature !== signature) {
       const radiusM = analysisRadiusM(request, mode);
       const bounds = analysisMercatorBounds(request, radiusM);
+      const texturePx = gpuHeightTexturePxForGrid(request.gridSizePx);
       terrainFieldRef.current = {
         signature,
-        field: await terrainTileLoaderRef.current.buildHeightField(bounds, chooseDemZoom(request, radiusM), gpuHeightTexturePx),
+        field: await terrainTileLoaderRef.current.buildHeightField(bounds, chooseDemZoom(request, radiusM), texturePx),
       };
     }
     return terrainFieldRef.current.field;
@@ -795,12 +804,19 @@ export function App() {
     if (token) {
       try {
         const mapboxToken = token;
+        const texturePx = gpuHeightTexturePxForGrid(nextAnalysis.gridSizePx);
+        if (gpuCoverageRef.current && gpuCoverageTexturePxRef.current !== texturePx) {
+          gpuCoverageRef.current.dispose();
+          gpuCoverageRef.current = null;
+          gpuCoverageTexturePxRef.current = null;
+        }
         if (!gpuCoverageRef.current) {
           gpuCoverageRef.current = GpuCoverageLayer.create({
             mapboxToken,
-            texturePx: gpuHeightTexturePx,
+            texturePx,
             coordinatesForAnalysis: coverageImageCoordinates,
           });
+          gpuCoverageTexturePxRef.current = gpuCoverageRef.current ? texturePx : null;
         }
         const gpuCoverage = gpuCoverageRef.current;
         if (gpuCoverage) {
@@ -956,6 +972,7 @@ export function App() {
       markerRef.current?.remove();
       gpuCoverageRef.current?.dispose();
       gpuCoverageRef.current = null;
+      gpuCoverageTexturePxRef.current = null;
       coverageDisplayCanvasRef.current?.remove();
       coverageDisplayCanvasRef.current = null;
       map.off("rotate", syncMapCamera);
@@ -977,6 +994,7 @@ export function App() {
     if (preferredCoverageEngine === "cpu-fallback") {
       gpuCoverageRef.current?.dispose();
       gpuCoverageRef.current = null;
+      gpuCoverageTexturePxRef.current = null;
     }
     const shouldSkipCoverageRefresh = skipNextCoverageEffectRef.current === analysis;
     if (shouldSkipCoverageRefresh) {
