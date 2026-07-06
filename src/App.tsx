@@ -502,6 +502,7 @@ export function App() {
       displayCanvas.height = overlay.gridSizePx;
       const context = displayCanvas.getContext("2d");
       if (context) {
+        context.imageSmoothingEnabled = false;
         context.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
         context.drawImage(overlay.canvas, 0, 0, displayCanvas.width, displayCanvas.height);
       }
@@ -537,7 +538,7 @@ export function App() {
 
   async function refreshCoverageLayer(map: mapboxgl.Map, nextAnalysis: AnalysisRequest, nextDebugMode: DebugMode) {
     const sequence = ++coverageRenderSeqRef.current;
-    if (preferredCoverageEngine === "gpu" && !nextAnalysis.includeBuildings && token) {
+    if (!nextAnalysis.includeBuildings && token) {
       try {
         const mapboxToken = token;
         if (!gpuCoverageRef.current) {
@@ -550,16 +551,22 @@ export function App() {
         const gpuCoverage = gpuCoverageRef.current;
         if (gpuCoverage) {
           await gpuCoverage.updateAnalysis(nextAnalysis, nextDebugMode);
-          const image = gpuCoverage.render();
+          const image =
+            preferredCoverageEngine === "gpu"
+              ? gpuCoverage.render()
+              : gpuCoverage.renderCpuReference();
           if (image && sequence === coverageRenderSeqRef.current) {
             applyCoverageOverlay(map, image);
-            updateDebugState({ gpuStats: gpuCoverage.debugStats() });
-            setCoverageEngine("gpu");
+            updateDebugState({
+              engine: image.engine,
+              gpuStats: image.engine === "gpu" ? gpuCoverage.debugStats() : null,
+            });
+            setCoverageEngine(image.engine);
             return;
           }
         }
       } catch (error) {
-        console.warn("GPU coverage renderer failed; falling back to CPU coverage.", error);
+        console.warn("Shared terrain coverage renderer failed; falling back to Mapbox CPU coverage.", error);
       }
     }
 

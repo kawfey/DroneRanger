@@ -15,6 +15,7 @@ type ValidationResult = {
   name: string;
   passed: boolean;
   maxAltitudeErrorM: number;
+  maxDistanceErrorM: number;
   classificationMismatches: number;
   cells: number;
 };
@@ -77,6 +78,7 @@ async function validateScenario(
   layer.render();
   const gpu = layer.readNumericCoverage();
   let maxAltitudeErrorM = 0;
+  let maxDistanceErrorM = 0;
   let classificationMismatches = 0;
   let worst = { x: 0, y: 0, cpu: 0, gpu: 0 };
 
@@ -85,12 +87,17 @@ async function validateScenario(
       const cpuIndex = y * spec.gridSizePx + x;
       const gpuIndex = (spec.gridSizePx - 1 - y) * spec.gridSizePx + x;
       const gpuRequiredAltitudeM = gpu[gpuIndex * 4];
+      const gpuDistanceM = gpu[gpuIndex * 4 + 3];
       const gpuReachable = gpu[gpuIndex * 4 + 1] >= 0.5 && gpu[gpuIndex * 4 + 2] >= 0.5;
       const cpuPixel = cpu[cpuIndex];
       const error = Math.abs(gpuRequiredAltitudeM - cpuPixel.requiredAltitudeM);
-      if (isGridCellInCircle(spec, x, y) && error > maxAltitudeErrorM) {
-        maxAltitudeErrorM = error;
-        worst = { x, y, cpu: cpuPixel.requiredAltitudeM, gpu: gpuRequiredAltitudeM };
+      if (isGridCellInCircle(spec, x, y)) {
+        const distanceError = Math.abs(gpuDistanceM - cpuPixel.debugValue);
+        if (error > maxAltitudeErrorM) {
+          maxAltitudeErrorM = error;
+          worst = { x, y, cpu: cpuPixel.requiredAltitudeM, gpu: gpuRequiredAltitudeM };
+        }
+        maxDistanceErrorM = Math.max(maxDistanceErrorM, distanceError);
       }
       if (gpuReachable !== cpuPixel.reachable) {
         classificationMismatches++;
@@ -100,8 +107,9 @@ async function validateScenario(
 
   return {
     name,
-    passed: maxAltitudeErrorM <= 1 && classificationMismatches === 0,
+    passed: maxAltitudeErrorM <= 0.01 && maxDistanceErrorM <= 3 && classificationMismatches === 0,
     maxAltitudeErrorM,
+    maxDistanceErrorM,
     classificationMismatches,
     cells: cpu.length,
     ...worst,
