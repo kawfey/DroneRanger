@@ -161,6 +161,17 @@ function updateReferenceCircle(map: mapboxgl.Map, analysis: AnalysisRequest): vo
   source?.setData(referenceCircleFeature(analysis.operator, analysis.radiusM));
 }
 
+export function hideStaleCoverage(map: mapboxgl.Map): void {
+  if (map.getLayer("los-coverage")) {
+    map.setPaintProperty("los-coverage", "raster-opacity", 0);
+  }
+}
+
+export function beginOperatorMove(map: mapboxgl.Map, analysis: AnalysisRequest): void {
+  updateReferenceCircle(map, analysis);
+  hideStaleCoverage(map);
+}
+
 function coverageImageCoordinates(
   operator: AnalysisRequest["operator"],
   radiusM: number,
@@ -309,6 +320,7 @@ function ensureCoverageCanvasSource(
   }
   map.setPaintProperty("los-coverage", "raster-resampling", "nearest");
   map.setPaintProperty("los-coverage", "raster-fade-duration", 0);
+  map.setPaintProperty("los-coverage", "raster-opacity", 0.86);
   map.triggerRepaint();
 }
 
@@ -420,6 +432,8 @@ export function App() {
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
   const previousStyleUriRef = useRef(defaultMapStyle.uri);
+  const refreshCoverageRef = useRef<(map: mapboxgl.Map, analysis: AnalysisRequest) => void>(() => undefined);
+  const skipNextCoverageEffectRef = useRef<AnalysisRequest | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisRequest>(defaultAnalysis);
   const [debugMode, setDebugMode] = useState<DebugMode>("combined");
   const [inspector, setInspector] = useState<CoveragePixel | null>(null);
@@ -633,6 +647,9 @@ export function App() {
     });
     setCoverageEngine("cpu-fallback");
   }
+  refreshCoverageRef.current = (map, nextAnalysis) => {
+    void refreshCoverageLayer(map, nextAnalysis, debugMode);
+  };
 
   const activeProfiles = useMemo(
     () => analysis.profiles.filter((profile) => analysis.selectedProfileIds.includes(profile.id)),
@@ -676,20 +693,25 @@ export function App() {
       .addTo(map);
     updateDebugState();
 
+    const commitOperatorMove = (lngLat: mapboxgl.LngLat) => {
+      const nextAnalysis = {
+        ...latestAnalysisRef.current,
+        operator: operatorFromLngLat(latestAnalysisRef.current, lngLat),
+      };
+      beginOperatorMove(map, nextAnalysis);
+      skipNextCoverageEffectRef.current = nextAnalysis;
+      setAnalysis(nextAnalysis);
+      refreshCoverageRef.current(map, nextAnalysis);
+    };
+
     markerRef.current.on("dragend", () => {
       const lngLat = markerRef.current!.getLngLat();
-      setAnalysis((current) => ({
-        ...current,
-        operator: { ...current.operator, lng: lngLat.lng, lat: lngLat.lat },
-      }));
+      commitOperatorMove(lngLat);
     });
 
     const placeOperator = (lngLat: mapboxgl.LngLat) => {
       markerRef.current?.setLngLat(lngLat);
-      setAnalysis((current) => ({
-        ...current,
-        operator: operatorFromLngLat(current, lngLat),
-      }));
+      commitOperatorMove(lngLat);
     };
     let placedOperatorOnMouseDown = false;
 
@@ -755,8 +777,12 @@ export function App() {
       gpuCoverageRef.current?.dispose();
       gpuCoverageRef.current = null;
     }
-    if (mapRef.current?.isStyleLoaded()) {
+    const shouldSkipCoverageRefresh = skipNextCoverageEffectRef.current === analysis;
+    if (shouldSkipCoverageRefresh) {
+      skipNextCoverageEffectRef.current = null;
+    } else if (mapRef.current?.isStyleLoaded()) {
       updateReferenceCircle(mapRef.current, analysis);
+      hideStaleCoverage(mapRef.current);
       void refreshCoverageLayer(mapRef.current, analysis, debugMode);
     }
     updateDebugState({

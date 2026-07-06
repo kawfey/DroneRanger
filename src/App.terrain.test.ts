@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { defaultAnalysis } from "./analysis/defaults";
-import { installAnalysisLayers, renderCoverageImage } from "./App";
+import { beginOperatorMove, hideStaleCoverage, installAnalysisLayers, renderCoverageImage } from "./App";
 import type { AnalysisRequest } from "./types";
 
 function createCanvas(): HTMLCanvasElement {
@@ -72,5 +72,43 @@ describe("terrain-backed coverage", () => {
 
     expect(terrainQueries).toBeGreaterThan(analysis.gridSizePx * analysis.gridSizePx);
     expect(overlay.engine).toBe("cpu-fallback");
+  });
+
+  it("hides stale coverage while an operator move is recalculating", () => {
+    const setPaintProperty = vi.fn();
+    const map = {
+      getLayer: vi.fn((id: string) => (id === "los-coverage" ? {} : undefined)),
+      setPaintProperty,
+    };
+
+    hideStaleCoverage(map as never);
+
+    expect(setPaintProperty).toHaveBeenCalledWith("los-coverage", "raster-opacity", 0);
+  });
+
+  it("updates the reference circle immediately when an operator move starts", () => {
+    const setData = vi.fn();
+    const setPaintProperty = vi.fn();
+    const map = {
+      getSource: vi.fn((id: string) => (id === "reference-radius" ? { setData } : undefined)),
+      getLayer: vi.fn((id: string) => (id === "los-coverage" ? {} : undefined)),
+      setPaintProperty,
+    };
+    const movedAnalysis: AnalysisRequest = {
+      ...defaultAnalysis,
+      operator: {
+        ...defaultAnalysis.operator,
+        lng: defaultAnalysis.operator.lng + 0.02,
+        lat: defaultAnalysis.operator.lat + 0.01,
+      },
+    };
+
+    beginOperatorMove(map as never, movedAnalysis);
+
+    expect(setData).toHaveBeenCalledTimes(1);
+    expect(setData.mock.calls[0]?.[0].geometry.coordinates[0][0]).not.toEqual(
+      defaultAnalysis.operator.lng,
+    );
+    expect(setPaintProperty).toHaveBeenCalledWith("los-coverage", "raster-opacity", 0);
   });
 });
