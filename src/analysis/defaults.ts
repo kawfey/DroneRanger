@@ -43,7 +43,7 @@ export const defaultAnalysis: AnalysisRequest = {
   operator: {
     lng: -3.7038,
     lat: 40.4168,
-    antennaHeightM: 2,
+    antennaHeightM: 1.5,
   },
   radiusM: 2500,
   gridSizePx: 100,

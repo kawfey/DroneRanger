@@ -552,7 +552,7 @@ export function App() {
         </label>
 
         <label>
-          Operator antenna
+          Operator antenna height
           <span className="input-with-unit">
             <input
               type="number"
@@ -724,7 +724,7 @@ export function App() {
           <ChevronDown className="disclosure-icon" size={16} />
         </summary>
         {analysis.profiles.map((profile) => (
-          <details className="profile-card" key={profile.id} open>
+          <details className="profile-card" key={profile.id}>
             <summary className="profile-card-summary">
               <label className="check-row" onClick={(event) => event.stopPropagation()}>
               <input
