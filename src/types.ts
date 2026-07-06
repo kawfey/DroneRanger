@@ -32,6 +32,7 @@ export type AnalysisRequest = {
     antennaHeightM: number;
   };
   radiusM: number;
+  gridSizePx: number;
   calculationRange: CalculationRange;
   altitude: {
     minM: number;

@@ -7,10 +7,10 @@ import { buildingHeightM } from "./buildings";
 import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "./rf";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile } from "../types";
 
-const raySteps = 14;
+const raySteps = 24;
 const maxRfAnalysisRadiusM = 100000;
 
-type TerrainSampler = {
+export type TerrainSampler = {
   queryTerrainElevation(
     lngLat: { lng: number; lat: number },
     options?: { exaggerated: boolean },
@@ -26,6 +26,15 @@ type TerrainSampler = {
 type ObstacleSample = {
   elevationM: number;
   source: "terrain" | "building";
+};
+
+export type LosRayResult = {
+  requiredAltitudeM: number;
+  requiredTargetAbsM: number;
+  requiredElevationChangeM: number;
+  operatorAltitudeAslM: number;
+  limitingObstacle: ObstacleSample["source"] | null;
+  targetTerrainM: number;
 };
 
 function limitingMarginDb(distanceM: number, profiles: LinkProfile[]): number {
@@ -106,20 +115,34 @@ export function inspectFlatEarthPixel(
   };
 }
 
-export function inspectTerrainPixel(
+export function evaluateFlatEarthLosRay(
+  request: AnalysisRequest,
+  target: { lng: number; lat: number },
+): LosRayResult {
+  const operatorAbsM = request.operator.antennaHeightM;
+  const requiredTargetAbsM = request.altitude.minM;
+  return {
+    requiredAltitudeM: request.altitude.minM,
+    requiredTargetAbsM,
+    requiredElevationChangeM: requiredTargetAbsM - operatorAbsM,
+    operatorAltitudeAslM: operatorAbsM,
+    limitingObstacle: null,
+    targetTerrainM: 0,
+  };
+}
+
+export function evaluateTerrainLosRay(
   map: TerrainSampler,
   request: AnalysisRequest,
   target: { lng: number; lat: number },
-  debugMode: DebugMode,
-): CoveragePixel {
-  const pixel = inspectFlatEarthPixel(request, target, debugMode);
+): LosRayResult {
   const operatorTerrain = terrainElevation(map, request.operator);
   const targetTerrain = terrainElevation(map, target);
   const operatorAbsM = operatorTerrain + request.operator.antennaHeightM;
   const operatorMercator = lngLatToMercator01(request.operator.lng, request.operator.lat);
   const targetMercator = lngLatToMercator01(target.lng, target.lat);
   let requiredTargetAbsM = targetTerrain + request.altitude.minM;
-  let limitingObstacle: ObstacleSample["source"] = "terrain";
+  let limitingObstacle: ObstacleSample["source"] | null = null;
 
   for (let step = 1; step < raySteps; step++) {
     const t = step / raySteps;
@@ -136,18 +159,35 @@ export function inspectTerrainPixel(
     }
   }
 
-  const requiredAltitudeM = requiredTargetAbsM - targetTerrain;
+  return {
+    requiredAltitudeM: requiredTargetAbsM - targetTerrain,
+    requiredTargetAbsM,
+    requiredElevationChangeM: requiredTargetAbsM - operatorAbsM,
+    operatorAltitudeAslM: operatorAbsM,
+    limitingObstacle,
+    targetTerrainM: targetTerrain,
+  };
+}
+
+export function inspectTerrainPixel(
+  map: TerrainSampler,
+  request: AnalysisRequest,
+  target: { lng: number; lat: number },
+  debugMode: DebugMode,
+): CoveragePixel {
+  const pixel = inspectFlatEarthPixel(request, target, debugMode);
+  const los = evaluateTerrainLosRay(map, request, target);
   const criteria = criteriaFromLabel(pixel.violationCriteria);
-  if (requiredAltitudeM > request.altitude.maxM) {
-    criteria.add(limitingObstacle === "building" ? "Building" : "Terrain");
+  if (los.requiredAltitudeM > request.altitude.maxM) {
+    criteria.add(los.limitingObstacle === "building" ? "Building" : "Terrain");
   }
 
   const reachable = criteria.size === 0;
   return {
     ...pixel,
-    requiredAltitudeM,
-    requiredElevationChangeM: requiredTargetAbsM - operatorAbsM,
-    operatorAltitudeAslM: operatorAbsM,
+    requiredAltitudeM: los.requiredAltitudeM,
+    requiredElevationChangeM: los.requiredElevationChangeM,
+    operatorAltitudeAslM: los.operatorAltitudeAslM,
     violationCriteria: criteriaLabel(criteria),
     reachable,
   };

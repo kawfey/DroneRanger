@@ -14,7 +14,13 @@ import {
   analysisRadiusM,
   inspectFlatEarthPixel,
   inspectTerrainPixel,
+  type TerrainSampler,
 } from "./analysis/singleRay";
+import {
+  lngLatToMercator01,
+  mercator01ToLngLat,
+  metersToMercatorUnits,
+} from "./analysis/coordinates";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile, LinkProfileId } from "./types";
 
 const token = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
@@ -57,6 +63,14 @@ type InspectorTarget = {
   lng: number;
   lat: number;
 };
+
+type CoverageImage = {
+  url: string;
+  coordinates: [[number, number], [number, number], [number, number], [number, number]];
+};
+
+const minCoverageGridPx = 25;
+const maxCoverageGridPx = 225;
 
 function profileLabel(id: LinkProfileId): string {
   return id[0].toUpperCase() + id.slice(1);
@@ -126,12 +140,156 @@ function updateReferenceCircle(map: mapboxgl.Map, analysis: AnalysisRequest): vo
   source?.setData(referenceCircleFeature(analysis.operator, analysis.radiusM));
 }
 
+function coverageImageCoordinates(
+  operator: AnalysisRequest["operator"],
+  radiusM: number,
+): CoverageImage["coordinates"] {
+  const center = lngLatToMercator01(operator.lng, operator.lat);
+  const radius = metersToMercatorUnits(radiusM, operator.lat);
+  const nw = mercator01ToLngLat({ x: center.x - radius, y: center.y - radius });
+  const ne = mercator01ToLngLat({ x: center.x + radius, y: center.y - radius });
+  const se = mercator01ToLngLat({ x: center.x + radius, y: center.y + radius });
+  const sw = mercator01ToLngLat({ x: center.x - radius, y: center.y + radius });
+  return [
+    [nw.lng, nw.lat],
+    [ne.lng, ne.lat],
+    [se.lng, se.lat],
+    [sw.lng, sw.lat],
+  ];
+}
+
+function shadeForPixel(pixel: CoveragePixel, analysis: AnalysisRequest): [number, number, number, number] {
+  if (!pixel.reachable) {
+    return [0, 0, 0, 0];
+  }
+  const span = Math.max(0.001, analysis.altitude.maxM - analysis.altitude.minM);
+  const t = Math.max(0, Math.min(1, (pixel.requiredAltitudeM - analysis.altitude.minM) / span));
+  const r = Math.round(46 + t * 216);
+  const g = Math.round(184 - t * 104);
+  const b = Math.round(83 - t * 45);
+  return [r, g, b, 178];
+}
+
+function renderCoverageImage(
+  map: TerrainSampler | null,
+  analysis: AnalysisRequest,
+  debugMode: DebugMode,
+): CoverageImage {
+  const radiusM = analysisRadiusM(analysis, debugMode);
+  const size = Math.max(minCoverageGridPx, Math.min(maxCoverageGridPx, Math.round(analysis.gridSizePx)));
+  const center = lngLatToMercator01(analysis.operator.lng, analysis.operator.lat);
+  const radius = metersToMercatorUnits(radiusM, analysis.operator.lat);
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return { url: "", coordinates: coverageImageCoordinates(analysis.operator, radiusM) };
+  }
+  const image = context.createImageData(size, size);
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const nx = (x + 0.5) / size;
+      const ny = (y + 0.5) / size;
+      const dx = nx * 2 - 1;
+      const dy = ny * 2 - 1;
+      if (dx * dx + dy * dy > 1) {
+        continue;
+      }
+      const target = mercator01ToLngLat({
+        x: center.x + dx * radius,
+        y: center.y + dy * radius,
+      });
+      const pixel = map
+        ? inspectTerrainPixel(map, analysis, target, debugMode)
+        : inspectFlatEarthPixel(analysis, target, debugMode);
+      const [r, g, b, a] = shadeForPixel(pixel, analysis);
+      const offset = (y * size + x) * 4;
+      image.data[offset] = r;
+      image.data[offset + 1] = g;
+      image.data[offset + 2] = b;
+      image.data[offset + 3] = a;
+    }
+  }
+
+  context.putImageData(image, 0, 0);
+  return {
+    url: canvas.toDataURL("image/png"),
+    coordinates: coverageImageCoordinates(analysis.operator, radiusM),
+  };
+}
+
+function updateCoverageLayer(
+  map: mapboxgl.Map,
+  analysis: AnalysisRequest,
+  debugMode: DebugMode,
+): void {
+  const image = renderCoverageImage(map, analysis, debugMode);
+  const source = map.getSource("los-coverage") as
+    | (mapboxgl.ImageSource & {
+        updateImage?: (image: { url: string; coordinates: CoverageImage["coordinates"] }) => void;
+      })
+    | undefined;
+
+  if (!source) {
+    map.addSource("los-coverage", {
+      type: "image",
+      url: image.url,
+      coordinates: image.coordinates,
+    });
+  } else {
+    source.updateImage?.(image);
+  }
+
+  if (!map.getLayer("los-coverage")) {
+    map.addLayer(
+      {
+        id: "los-coverage",
+        type: "raster",
+        source: "los-coverage",
+        paint: {
+          "raster-opacity": 0.86,
+          "raster-fade-duration": 0,
+          "raster-resampling": "nearest",
+        },
+      },
+      map.getLayer("reference-radius-line") ? "reference-radius-line" : undefined,
+    );
+  }
+}
+
 function stylePreviewUrl(style: MapStyleTemplate): string {
   const path = style.uri.replace("mapbox://styles/", "");
   return `https://api.mapbox.com/styles/v1/${path}/static/-3.7038,40.4168,11,0/104x104?access_token=${token}`;
 }
 
-function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisRequest): void {
+function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisRequest, debugMode: DebugMode): void {
+  if (!map.getSource("mapbox-dem")) {
+    map.addSource("mapbox-dem", {
+      type: "raster-dem",
+      url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+      tileSize: 512,
+      maxzoom: 14,
+    });
+  }
+  map.setTerrain({ source: "mapbox-dem", exaggeration: 1 });
+
+  if (map.getSource("composite") && !map.getLayer("los-building-reference")) {
+    map.addLayer({
+      id: "los-building-reference",
+      type: "fill-extrusion",
+      source: "composite",
+      "source-layer": "building",
+      minzoom: 0,
+      paint: {
+        "fill-extrusion-height": ["coalesce", ["get", "height"], ["get", "render_height"], 3.1],
+        "fill-extrusion-base": ["coalesce", ["get", "min_height"], 0],
+        "fill-extrusion-opacity": 0,
+      },
+    });
+  }
+
   if (!map.getSource("reference-radius")) {
     map.addSource("reference-radius", {
       type: "geojson",
@@ -166,6 +324,7 @@ function installAnalysisLayers(map: mapboxgl.Map, analysis: AnalysisRequest): vo
     });
   }
 
+  updateCoverageLayer(map, analysis, debugMode);
 }
 
 function operatorFromLngLat(
@@ -188,6 +347,7 @@ export function App() {
   const [debugMode, setDebugMode] = useState<DebugMode>("combined");
   const [inspector, setInspector] = useState<CoveragePixel | null>(null);
   const [inspectorTarget, setInspectorTarget] = useState<InspectorTarget | null>(null);
+  const [mapDataRevision, setMapDataRevision] = useState(0);
   const [selectedStyleId, setSelectedStyleId] = useState(mapStyleTemplates[0].id);
   const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
   const hasToken = Boolean(token && token !== "your_mapbox_token_here");
@@ -268,7 +428,11 @@ export function App() {
     });
 
     map.on("load", () => {
-      installAnalysisLayers(map, analysis);
+      installAnalysisLayers(map, analysis, debugMode);
+      map.once("idle", () => {
+        updateCoverageLayer(map, latestAnalysisRef.current, debugMode);
+        setMapDataRevision((revision) => revision + 1);
+      });
     });
 
     return () => {
@@ -283,8 +447,9 @@ export function App() {
     markerRef.current?.setLngLat([analysis.operator.lng, analysis.operator.lat]);
     if (mapRef.current?.isStyleLoaded()) {
       updateReferenceCircle(mapRef.current, analysis);
+      updateCoverageLayer(mapRef.current, analysis, debugMode);
     }
-  }, [analysis]);
+  }, [analysis, debugMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -292,10 +457,14 @@ export function App() {
     if (previousStyleUriRef.current === selectedStyle.uri) return;
     previousStyleUriRef.current = selectedStyle.uri;
     map.setStyle(selectedStyle.uri);
-    map.once("style.load", () =>
-      installAnalysisLayers(map, latestAnalysisRef.current),
-    );
-  }, [hasToken, selectedStyle.uri]);
+    map.once("style.load", () => {
+      installAnalysisLayers(map, latestAnalysisRef.current, debugMode);
+      map.once("idle", () => {
+        updateCoverageLayer(map, latestAnalysisRef.current, debugMode);
+        setMapDataRevision((revision) => revision + 1);
+      });
+    });
+  }, [debugMode, hasToken, selectedStyle.uri]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -308,9 +477,9 @@ export function App() {
         ? inspectTerrainPixel(map, analysis, inspectorTarget, debugMode)
         : inspectFlatEarthPixel(analysis, inspectorTarget, debugMode),
     );
-  }, [analysis, debugMode, inspectorTarget]);
+  }, [analysis, debugMode, inspectorTarget, mapDataRevision]);
 
-  function setNumber(path: "radiusM", value: number) {
+  function setNumber(path: "radiusM" | "gridSizePx", value: number) {
     setAnalysis((current) => ({ ...current, [path]: value }));
   }
 
@@ -420,8 +589,8 @@ export function App() {
           </label>
         </div>
 
-        <label>
-          Coverage mode
+          <label>
+            Coverage mode
           <select
             value={debugMode}
             onChange={(event) => setDebugMode(event.target.value as DebugMode)}
@@ -432,7 +601,22 @@ export function App() {
               </option>
             ))}
           </select>
-        </label>
+          </label>
+
+          <label>
+            Grid resolution
+            <input
+              type="range"
+              min={minCoverageGridPx}
+              max={maxCoverageGridPx}
+              step="5"
+              value={analysis.gridSizePx}
+              onChange={(event) => setNumber("gridSizePx", Number(event.target.value))}
+            />
+            <output>
+              {analysis.gridSizePx} x {analysis.gridSizePx} pixels
+            </output>
+          </label>
 
         <details className="config-menu">
           <summary>
