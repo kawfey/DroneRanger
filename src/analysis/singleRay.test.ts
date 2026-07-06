@@ -137,7 +137,34 @@ describe("single ray inspector", () => {
     const inspected = inspectTerrainPixel(ridgeNearTargetMap, request, target, "los");
 
     expect(inspected.operatorAltitudeAslM).toBe(100);
-    expect(inspected.requiredElevationChangeM).toBeLessThan(0);
-    expect(inspected.requiredElevationChangeM).toBeCloseTo(-50, 1);
+    expect(inspected.requiredElevationChangeM).toBe(0);
+  });
+
+  it("marks points unreachable when required elevation change exceeds max altitude", () => {
+    const request = {
+      ...defaultAnalysis,
+      altitude: {
+        ...defaultAnalysis.altitude,
+        minM: 0,
+        maxM: 120,
+      },
+    };
+    const target = {
+      lng: request.operator.lng + 0.01,
+      lat: request.operator.lat,
+    };
+    const ridgeMap = {
+      queryTerrainElevation: (lngLat: { lng: number }) =>
+        lngLat.lng > request.operator.lng + 0.004 && lngLat.lng < request.operator.lng + 0.006
+          ? 200
+          : 0,
+    };
+
+    const inspected = inspectTerrainPixel(ridgeMap, request, target, "los");
+
+    expect(inspected.requiredElevationChangeM).toBeGreaterThan(request.altitude.maxM);
+    expect(inspected.requiredAltitudeM).toBe(inspected.requiredElevationChangeM);
+    expect(inspected.reachable).toBe(false);
+    expect(inspected.violationCriteria).toBe("Terrain");
   });
 });

@@ -98,10 +98,10 @@ export function inspectFlatEarthPixel(
   const criteria = baseViolationCriteria(request, debugMode, distanceM, activeRadiusM, activeMarginDb);
   const reachable = criteria.size === 0;
   const operatorAbsM = request.operator.antennaHeightM;
-  const targetAbsM = request.altitude.minM;
+  const targetAbsM = operatorAbsM + request.altitude.minM;
   return {
-    requiredAltitudeM: targetAbsM,
-    requiredElevationChangeM: targetAbsM - operatorAbsM,
+    requiredAltitudeM: request.altitude.minM,
+    requiredElevationChangeM: request.altitude.minM,
     operatorAltitudeAslM: operatorAbsM,
     violationCriteria: criteriaLabel(criteria),
     reachable,
@@ -120,7 +120,7 @@ export function evaluateFlatEarthLosRay(
   target: { lng: number; lat: number },
 ): LosRayResult {
   const operatorAbsM = request.operator.antennaHeightM;
-  const requiredTargetAbsM = request.altitude.minM;
+  const requiredTargetAbsM = operatorAbsM + request.altitude.minM;
   return {
     requiredAltitudeM: request.altitude.minM,
     requiredTargetAbsM,
@@ -141,7 +141,7 @@ export function evaluateTerrainLosRay(
   const operatorAbsM = operatorTerrain + request.operator.antennaHeightM;
   const operatorMercator = lngLatToMercator01(request.operator.lng, request.operator.lat);
   const targetMercator = lngLatToMercator01(target.lng, target.lat);
-  let requiredTargetAbsM = targetTerrain + request.altitude.minM;
+  let requiredTargetAbsM = operatorAbsM + request.altitude.minM;
   let limitingObstacle: ObstacleSample["source"] | null = null;
 
   for (let step = 1; step < raySteps; step++) {
@@ -160,7 +160,7 @@ export function evaluateTerrainLosRay(
   }
 
   return {
-    requiredAltitudeM: requiredTargetAbsM - targetTerrain,
+    requiredAltitudeM: requiredTargetAbsM - operatorAbsM,
     requiredTargetAbsM,
     requiredElevationChangeM: requiredTargetAbsM - operatorAbsM,
     operatorAltitudeAslM: operatorAbsM,
