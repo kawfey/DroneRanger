@@ -29,7 +29,7 @@ import {
   mercator01ToLngLat,
   metersToMercatorUnits,
 } from "./analysis/coordinates";
-import { GpuCoverageLayer, type GpuCoverageImage } from "./gpuCoverageLayer";
+import { GpuCoverageLayer, type GpuCoverageDebugStats, type GpuCoverageImage } from "./gpuCoverageLayer";
 import type {
   AnalysisRequest,
   CoverageEngine,
@@ -89,6 +89,8 @@ type DroneRangeDebugState = {
   coverageCanvasFingerprint: string | null;
   renderSequence: number;
   engine: CoverageEngine;
+  preferredEngine: CoverageEngine;
+  gpuStats: GpuCoverageDebugStats | null;
   hasCoverageSource: boolean;
   sourceType: string | null;
   sourceTypeCounts: Record<string, number>;
@@ -101,8 +103,6 @@ declare global {
     __droneRangeDebug?: DroneRangeDebugState;
   }
 }
-
-const enableGpuCoverage = false;
 
 function profileLabel(id: LinkProfileId): string {
   return id[0].toUpperCase() + id.slice(1);
@@ -447,6 +447,7 @@ export function App() {
   const [inspectorTarget, setInspectorTarget] = useState<InspectorTarget | null>(null);
   const [mapDataRevision, setMapDataRevision] = useState(0);
   const [coverageEngine, setCoverageEngine] = useState<CoverageEngine>("cpu-fallback");
+  const [preferredCoverageEngine, setPreferredCoverageEngine] = useState<CoverageEngine>("cpu-fallback");
   const [selectedStyleId, setSelectedStyleId] = useState(mapStyleTemplates[0].id);
   const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
   const hasToken = Boolean(token && token !== "your_mapbox_token_here");
@@ -463,6 +464,8 @@ export function App() {
       coverageCanvasFingerprint: window.__droneRangeDebug?.coverageCanvasFingerprint ?? null,
       renderSequence: coverageRenderSeqRef.current,
       engine: coverageEngine,
+      preferredEngine: preferredCoverageEngine,
+      gpuStats: window.__droneRangeDebug?.gpuStats ?? null,
       hasCoverageSource: Boolean(map?.getSource("los-coverage")),
       sourceType: map ? getCoverageSourceType(map) : null,
       sourceTypeCounts: map ? getStyleSourceTypeCounts(map) : {},
@@ -512,6 +515,7 @@ export function App() {
       renderedOperator: overlay.renderedOperator,
       renderSequence: coverageRenderSeqRef.current,
       engine: overlay.engine,
+      preferredEngine: preferredCoverageEngine,
       hasCoverageSource: Boolean(map.getSource("los-coverage")),
       sourceType: getCoverageSourceType(map),
       sourceTypeCounts: getStyleSourceTypeCounts(map),
@@ -521,13 +525,17 @@ export function App() {
   const coverageEngineLabel =
     coverageEngine === "gpu"
       ? "GPU terrain"
-      : analysis.includeBuildings
+      : analysis.includeBuildings && preferredCoverageEngine === "gpu"
+        ? "CPU buildings"
+        : preferredCoverageEngine === "gpu"
+          ? "CPU fallback"
+          : analysis.includeBuildings
         ? "CPU buildings"
         : "CPU fallback";
 
   async function refreshCoverageLayer(map: mapboxgl.Map, nextAnalysis: AnalysisRequest, nextDebugMode: DebugMode) {
     const sequence = ++coverageRenderSeqRef.current;
-    if (enableGpuCoverage && !nextAnalysis.includeBuildings && token) {
+    if (preferredCoverageEngine === "gpu" && !nextAnalysis.includeBuildings && token) {
       try {
         const mapboxToken = token;
         if (!gpuCoverageRef.current) {
@@ -543,6 +551,7 @@ export function App() {
           const image = gpuCoverage.render();
           if (image && sequence === coverageRenderSeqRef.current) {
             applyCoverageOverlay(map, image);
+            updateDebugState({ gpuStats: gpuCoverage.debugStats() });
             setCoverageEngine("gpu");
             return;
           }
@@ -562,6 +571,8 @@ export function App() {
       renderedOperator: nextAnalysis.operator,
       renderSequence: coverageRenderSeqRef.current,
       engine: "cpu-fallback",
+      preferredEngine: preferredCoverageEngine,
+      gpuStats: null,
       hasCoverageSource: Boolean(map.getSource("los-coverage")),
       sourceType: getCoverageSourceType(map),
       sourceTypeCounts: getStyleSourceTypeCounts(map),
@@ -672,6 +683,10 @@ export function App() {
   useEffect(() => {
     latestAnalysisRef.current = analysis;
     markerRef.current?.setLngLat([analysis.operator.lng, analysis.operator.lat]);
+    if (preferredCoverageEngine === "cpu-fallback") {
+      gpuCoverageRef.current?.dispose();
+      gpuCoverageRef.current = null;
+    }
     if (mapRef.current?.isStyleLoaded()) {
       updateReferenceCircle(mapRef.current, analysis);
       void refreshCoverageLayer(mapRef.current, analysis, debugMode);
@@ -686,7 +701,7 @@ export function App() {
           }
         : null,
     });
-  }, [analysis, debugMode]);
+  }, [analysis, debugMode, preferredCoverageEngine]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -701,7 +716,7 @@ export function App() {
         setMapDataRevision((revision) => revision + 1);
       });
     });
-  }, [debugMode, hasToken, selectedStyle.uri]);
+  }, [debugMode, hasToken, selectedStyle.uri, preferredCoverageEngine]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -916,6 +931,28 @@ export function App() {
               {analysis.gridSizePx} x {analysis.gridSizePx} pixels
             </output>
           </label>
+
+          <div className="segmented two" role="radiogroup" aria-label="Coverage renderer">
+            <button
+              type="button"
+              className={preferredCoverageEngine === "cpu-fallback" ? "active" : ""}
+              onClick={() => setPreferredCoverageEngine("cpu-fallback")}
+            >
+              CPU
+            </button>
+            <button
+              type="button"
+              className={preferredCoverageEngine === "gpu" ? "active" : ""}
+              onClick={() => setPreferredCoverageEngine("gpu")}
+            >
+              GPU
+            </button>
+          </div>
+          <output>
+            {preferredCoverageEngine === "gpu" && analysis.includeBuildings
+              ? "GPU selected, CPU active for buildings"
+              : `Active renderer: ${coverageEngine === "gpu" ? "GPU" : "CPU"}`}
+          </output>
 
           <label>
             <span className="toggle-row">

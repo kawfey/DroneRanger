@@ -22,6 +22,7 @@ describe("DEM tile math", () => {
     const tiles = coveringDemTiles(bounds, zoom);
 
     expect(zoom).toBeLessThanOrEqual(mapboxTerrainDemMaxZoom);
+    expect(zoom).toBeGreaterThan(8);
     expect(tiles.length).toBeGreaterThan(0);
     expect(new Set(tiles.map((tile) => `${tile.z}/${tile.x}/${tile.y}`)).size).toBe(tiles.length);
   });

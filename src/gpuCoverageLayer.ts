@@ -25,6 +25,19 @@ type DecodedTile = {
   elevations: Float32Array;
 };
 
+export type GpuCoverageDebugStats = {
+  demZoom: number | null;
+  demTileCount: number;
+  heightMinM: number;
+  heightMaxM: number;
+  heightMeanM: number;
+  requiredAltitudeMinM: number;
+  requiredAltitudeMaxM: number;
+  reachableCount: number;
+  coveredCount: number;
+  pixelCount: number;
+};
+
 const vertexShaderSource = `#version 300 es
 layout(location = 0) in vec2 a_position;
 out vec2 v_uv;
@@ -137,6 +150,8 @@ export class GpuCoverageLayer {
   private bounds: MercatorBounds | null = null;
   private heightData: Float32Array | null = null;
   private demSignature = "";
+  private demZoom: number | null = null;
+  private demTileCount = 0;
 
   static create(options: GpuCoverageLayerOptions): GpuCoverageLayer | null {
     const canvas = document.createElement("canvas");
@@ -183,6 +198,7 @@ export class GpuCoverageLayer {
     const radiusM = analysisRadiusM(analysis, debugMode);
     const z = chooseDemZoom(analysis, radiusM);
     const bounds = analysisMercatorBounds(analysis, radiusM);
+    this.demZoom = z;
     const signature = [
       z,
       bounds.west.toFixed(8),
@@ -219,6 +235,8 @@ export class GpuCoverageLayer {
     this.bounds = bounds;
     this.heightData = elevations;
     this.demSignature = "";
+    this.demZoom = null;
+    this.demTileCount = 0;
     this.uploadHeightTexture(elevations);
   }
 
@@ -287,9 +305,56 @@ export class GpuCoverageLayer {
     return output;
   }
 
+  debugStats(): GpuCoverageDebugStats | null {
+    if (!this.heightData) {
+      return null;
+    }
+    const numeric = this.readNumericCoverage();
+    let heightMinM = Infinity;
+    let heightMaxM = -Infinity;
+    let heightSumM = 0;
+    for (const height of this.heightData) {
+      heightMinM = Math.min(heightMinM, height);
+      heightMaxM = Math.max(heightMaxM, height);
+      heightSumM += height;
+    }
+
+    let requiredAltitudeMinM = Infinity;
+    let requiredAltitudeMaxM = -Infinity;
+    let reachableCount = 0;
+    let coveredCount = 0;
+    for (let index = 0; index < numeric.length; index += 4) {
+      const requiredAltitudeM = numeric[index] ?? 0;
+      const reachable = (numeric[index + 1] ?? 0) >= 0.5;
+      const inRange = (numeric[index + 2] ?? 0) >= 0.5;
+      if (inRange) {
+        coveredCount++;
+        requiredAltitudeMinM = Math.min(requiredAltitudeMinM, requiredAltitudeM);
+        requiredAltitudeMaxM = Math.max(requiredAltitudeMaxM, requiredAltitudeM);
+      }
+      if (reachable && inRange) {
+        reachableCount++;
+      }
+    }
+
+    return {
+      demZoom: this.demZoom,
+      demTileCount: this.demTileCount,
+      heightMinM,
+      heightMaxM,
+      heightMeanM: heightSumM / this.heightData.length,
+      requiredAltitudeMinM,
+      requiredAltitudeMaxM,
+      reachableCount,
+      coveredCount,
+      pixelCount: this.canvas.width * this.canvas.height,
+    };
+  }
+
   private async buildHeightTexture(bounds: MercatorBounds, z: number): Promise<Float32Array> {
-    const tiles = await Promise.all(coveringDemTiles(bounds, z).map((tile) => this.loadTile(tile)));
     const tileIds = coveringDemTiles(bounds, z);
+    this.demTileCount = tileIds.length;
+    const tiles = await Promise.all(tileIds.map((tile) => this.loadTile(tile)));
     const texturePx = this.canvas.width;
     const output = new Float32Array(texturePx * texturePx);
     const scale = 2 ** z;

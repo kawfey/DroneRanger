@@ -68,7 +68,7 @@ export function chooseDemZoom(request: AnalysisRequest, radiusM: number): number
     x: center.x + metersToMercatorUnits((radiusM * 2) / gridSize, request.operator.lat),
     y: center.y,
   });
-  const samplePxM = Math.max(1, Math.abs(east.lng - request.operator.lng));
+  const samplePxM = Math.max(1e-9, Math.abs(east.lng - request.operator.lng));
   const targetTileLngSpan = samplePxM * 256;
   const zoom = Math.ceil(Math.log2(360 / targetTileLngSpan));
   return Math.max(0, Math.min(mapboxTerrainDemMaxZoom, zoom));
