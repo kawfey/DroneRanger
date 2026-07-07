@@ -96,6 +96,19 @@ select {
   font-weight: 650;
 }
 
+.app-header {
+  min-height: 46px;
+}
+
+.app-header img {
+  display: block;
+  width: min(252px, calc(100% - 42px));
+  height: auto;
+  max-height: 44px;
+  object-fit: contain;
+  object-position: left center;
+}
+
 summary.panel-title {
   cursor: pointer;
   list-style: none;

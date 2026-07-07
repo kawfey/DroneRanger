@@ -47,15 +47,18 @@
   "build": {
     "appId": "com.drone-ranger.app",
     "productName": "Drone Ranger",
+    "icon": "build/icon.ico",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "build/**/*",
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": "portable"
     },
     "linux": {

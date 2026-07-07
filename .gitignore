@@ -30,6 +30,9 @@ pnpm-debug.log*
 dist/
 dist-electron/
 build/
+!build/
+!build/icon.ico
+!build/icon.png
 release*/
 .vite/
 .next/

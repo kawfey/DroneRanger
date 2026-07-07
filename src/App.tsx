@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import {
   Activity,
-  Antenna,
   ChevronDown,
   Cuboid,
   Layers,
@@ -56,6 +55,7 @@ import {
   type ReferenceCircleFeature,
 } from "./coverageDebug";
 import { GpuCoverageLayer } from "./gpuCoverageLayer";
+import droneRangerHeaderUrl from "./assets/drone-ranger-header.png";
 import type {
   AnalysisRequest,
   CoverageEngine,
@@ -1166,9 +1166,8 @@ export function App() {
       )}
 
       <aside className="toolbar" aria-label="Analysis controls">
-        <div className="panel-title">
-          <Antenna size={18} />
-          <span>Range Calculator</span>
+        <div className="panel-title app-header">
+          <img src={droneRangerHeaderUrl} alt="Drone Ranger" />
           <button
             type="button"
             title="Reload coverage"

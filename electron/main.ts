@@ -10,6 +10,7 @@ const mapboxTokenFileName = "mapbox-token.json";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const appIconPath = path.join(__dirname, "../build/icon.ico");
 
 function configureUserDataPath() {
   const userDataPath = path.join(app.getPath("home"), ".drone_ranger");
@@ -205,6 +206,7 @@ async function promptForMapboxToken(): Promise<string> {
         maximizable: false,
         minimizable: false,
         title: "Mapbox API key",
+        icon: appIconPath,
         webPreferences: {
           preload: path.join(__dirname, "preload.cjs"),
           contextIsolation: true,
@@ -228,11 +230,12 @@ async function createWindow() {
   const isDev = isDevelopment();
   const mapboxToken = isDev ? "" : await promptForMapboxToken();
   const mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    width: 1400,
+    height: 900,
     minWidth: 960,
     minHeight: 640,
     autoHideMenuBar: !isDev,
+    icon: appIconPath,
     title: appName,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
