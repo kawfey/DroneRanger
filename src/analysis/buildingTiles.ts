@@ -17,25 +17,37 @@ export type BuildingHeightField = {
   tileCount: number;
 };
 
+export type ParsedBuildingPolygon = {
+  rings: WebMercator[][];
+  heightM: number;
+};
+
+type BuildingTileLoaderOptions = {
+  fetchTile?: (tile: DemTileId, url: string) => Promise<ArrayBuffer>;
+  parseTile?: (data: ArrayBuffer, tile: DemTileId) => ParsedBuildingPolygon[];
+};
+
 const preferredBuildingZoom = 15;
 const minBuildingZoom = 12;
 const maxBuildingTiles = 96;
 
 export class BuildingHeightTileLoader {
   private readonly tileCache = new Map<string, Promise<ArrayBuffer>>();
+  private readonly parsedTileCache = new Map<string, Promise<ParsedBuildingPolygon[]>>();
 
-  constructor(private readonly mapboxToken: string) {}
+  constructor(
+    private readonly mapboxToken: string,
+    private readonly options: BuildingTileLoaderOptions = {},
+  ) {}
 
   async buildHeightField(bounds: MercatorBounds, width: number, height: number): Promise<BuildingHeightField> {
     const zoom = chooseBuildingZoom(bounds);
     const tiles = coveringDemTiles(bounds, zoom);
     const buildingHeightsM = new Float32Array(width * height);
-    await Promise.all(
-      tiles.map(async (tile) => {
-        const data = await this.loadTile(tile);
-        rasterizeBuildingTile(data, tile, bounds, width, height, buildingHeightsM);
-      }),
-    );
+    const parsedTiles = await Promise.all(tiles.map((tile) => this.loadParsedTile(tile)));
+    for (const polygons of parsedTiles) {
+      rasterizeParsedBuildingPolygons(polygons, bounds, width, height, buildingHeightsM);
+    }
     return {
       width,
       height,
@@ -46,22 +58,34 @@ export class BuildingHeightTileLoader {
     };
   }
 
+  private loadParsedTile(tile: DemTileId): Promise<ParsedBuildingPolygon[]> {
+    const key = `${tile.z}/${tile.x}/${tile.y}`;
+    const cached = this.parsedTileCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    const promise = this.loadTile(tile).then((data) => (this.options.parseTile ?? parseBuildingTile)(data, tile));
+    this.parsedTileCache.set(key, promise);
+    return promise;
+  }
+
   private loadTile(tile: DemTileId): Promise<ArrayBuffer> {
     const key = `${tile.z}/${tile.x}/${tile.y}`;
     const cached = this.tileCache.get(key);
     if (cached) {
       return cached;
     }
-    const promise = fetch(
-      `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/${tile.z}/${tile.x}/${tile.y}.vector.pbf?access_token=${encodeURIComponent(
-        this.mapboxToken,
-      )}`,
-    ).then((response) => {
-      if (!response.ok) {
-        throw new Error(`Unable to load building tile ${key}: ${response.status}`);
-      }
-      return response.arrayBuffer();
-    });
+    const url = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/${tile.z}/${tile.x}/${tile.y}.vector.pbf?access_token=${encodeURIComponent(
+      this.mapboxToken,
+    )}`;
+    const promise = this.options.fetchTile
+      ? this.options.fetchTile(tile, url)
+      : fetch(url).then((response) => {
+          if (!response.ok) {
+            throw new Error(`Unable to load building tile ${key}: ${response.status}`);
+          }
+          return response.arrayBuffer();
+        });
     this.tileCache.set(key, promise);
     return promise;
   }
@@ -84,20 +108,17 @@ function chooseBuildingZoom(bounds: MercatorBounds): number {
   return minBuildingZoom;
 }
 
-function rasterizeBuildingTile(
+function parseBuildingTile(
   data: ArrayBuffer,
   tileId: DemTileId,
-  bounds: MercatorBounds,
-  width: number,
-  height: number,
-  output: Float32Array,
-): void {
+): ParsedBuildingPolygon[] {
   const tile = new VectorTile(new PbfReader(new Uint8Array(data)));
   const layer = tile.layers.building;
   if (!layer) {
-    return;
+    return [];
   }
 
+  const polygons: ParsedBuildingPolygon[] = [];
   for (let index = 0; index < layer.length; index++) {
     const feature = layer.feature(index);
     if (feature.type !== 3) {
@@ -109,24 +130,40 @@ function rasterizeBuildingTile(
     }
     const geometry = feature.toGeoJSON(tileId.x, tileId.y, tileId.z).geometry;
     if (geometry.type === "Polygon") {
-      rasterizePolygon(geometry.coordinates as PolygonCoordinates, heightM, bounds, width, height, output);
+      polygons.push({ rings: mercatorRings(geometry.coordinates as PolygonCoordinates), heightM });
     } else if (geometry.type === "MultiPolygon") {
       for (const polygon of geometry.coordinates as MultiPolygonCoordinates) {
-        rasterizePolygon(polygon, heightM, bounds, width, height, output);
+        polygons.push({ rings: mercatorRings(polygon), heightM });
       }
     }
+  }
+  return polygons;
+}
+
+function mercatorRings(polygon: PolygonCoordinates): WebMercator[][] {
+  return polygon.map((ring) => ring.map(([lng, lat]) => lngLatToMercator01(lng, lat)));
+}
+
+export function rasterizeParsedBuildingPolygons(
+  polygons: ParsedBuildingPolygon[],
+  bounds: MercatorBounds,
+  width: number,
+  height: number,
+  output: Float32Array,
+): void {
+  for (const polygon of polygons) {
+    rasterizePolygon(polygon.rings, polygon.heightM, bounds, width, height, output);
   }
 }
 
 function rasterizePolygon(
-  polygon: PolygonCoordinates,
+  rings: WebMercator[][],
   heightM: number,
   bounds: MercatorBounds,
   width: number,
   height: number,
   output: Float32Array,
 ): void {
-  const rings = polygon.map((ring) => ring.map(([lng, lat]) => lngLatToMercator01(lng, lat)));
   const outer = rings[0];
   if (!outer || outer.length < 3) {
     return;

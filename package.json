@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:operator-move": "node scripts/operator-move-refresh.mjs",
+    "test:grid-size-freeze": "node scripts/grid-size-freeze-regression.mjs",
+    "bench:click-to-overlay": "node scripts/click-to-overlay-benchmark.mjs",
     "test:gpu": "node scripts/gpu-validation.mjs"
   },
   "dependencies": {
