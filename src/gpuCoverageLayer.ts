@@ -11,6 +11,7 @@ import {
   coverageRaySteps,
   createCoverageGridSpec,
   gridCellMercator,
+  maxGpuCoverageGridPx,
   sampleObstacleHeightField,
   solveHeightFieldGrid,
   type HeightField,
@@ -325,7 +326,7 @@ export class GpuCoverageLayer {
     const startedAt = performance.now();
     this.analysis = analysis;
     this.debugMode = debugMode;
-    const gridSize = clampGridSize(analysis.gridSizePx);
+    const gridSize = clampGridSize(analysis.gridSizePx, maxGpuCoverageGridPx);
     if (this.canvas.width !== gridSize || this.canvas.height !== gridSize) {
       this.canvas.width = gridSize;
       this.canvas.height = gridSize;
@@ -402,7 +403,7 @@ export class GpuCoverageLayer {
   ): void {
     this.analysis = analysis;
     this.debugMode = debugMode;
-    const gridSize = clampGridSize(analysis.gridSizePx);
+    const gridSize = clampGridSize(analysis.gridSizePx, maxGpuCoverageGridPx);
     if (this.canvas.width !== gridSize || this.canvas.height !== gridSize) {
       this.canvas.width = gridSize;
       this.canvas.height = gridSize;
@@ -491,7 +492,7 @@ export class GpuCoverageLayer {
     }
     context.imageSmoothingEnabled = false;
     const imageData = context.createImageData(this.canvas.width, this.canvas.height);
-    const spec = createCoverageGridSpec(this.analysis, this.debugMode);
+    const spec = createCoverageGridSpec(this.analysis, this.debugMode, maxGpuCoverageGridPx);
     const field: HeightField = {
       width: this.options.texturePx,
       height: this.options.texturePx,
@@ -748,7 +749,7 @@ export class GpuCoverageLayer {
     if (!this.analysis) {
       return;
     }
-    const operatorUv = createCoverageGridSpec(this.analysis, this.debugMode).operatorUv;
+    const operatorUv = createCoverageGridSpec(this.analysis, this.debugMode, maxGpuCoverageGridPx).operatorUv;
     gl.useProgram(program);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.heightTexture);

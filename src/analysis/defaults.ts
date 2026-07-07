@@ -11,7 +11,7 @@ export const defaultProfiles: LinkProfile[] = [
     rxGainDbi: 1.2,
     rxLossDb: 0,
     rxSensitivityDbm: -112,
-    requiredMarginDb: 6,
+    requiredMarginDb: 10,
   },
   {
     id: "telemetry",

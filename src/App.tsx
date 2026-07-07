@@ -23,8 +23,9 @@ import {
 import {
   clampGridSize,
   createCoverageGridSpec,
+  maxCpuCoverageGridPx,
   gridCellMercator,
-  maxCoverageGridPx,
+  maxGpuCoverageGridPx,
   minCoverageGridPx,
   sampleHeightField,
 } from "./analysis/coverageGrid";
@@ -105,7 +106,7 @@ type InspectorTarget = {
   lat: number;
 };
 
-const gpuHeightTextureTiersPx = [128, 256, 384, 512, 768] as const;
+const gpuHeightTextureTiersPx = [128, 256, 384, 512, 768, 1024, 1536, 2048] as const;
 const coverageDisplayScale = 4;
 const map3dPitch = 55;
 let coverageSourceCanvas: HTMLCanvasElement | null = null;
@@ -133,7 +134,7 @@ function modeMarginLabel(debugMode: DebugMode): string {
 }
 
 function gpuHeightTexturePxForGrid(gridSizePx: number): number {
-  const targetPx = clampGridSize(gridSizePx) * 2;
+  const targetPx = clampGridSize(gridSizePx, maxGpuCoverageGridPx) * 2;
   return gpuHeightTextureTiersPx.find((tier) => tier >= targetPx) ?? gpuHeightTextureTiersPx[gpuHeightTextureTiersPx.length - 1];
 }
 
@@ -610,7 +611,7 @@ export function App() {
         window.__droneRangeDebug?.engine ?? coverageEngine,
         window.__droneRangeDebug?.preferredEngine ?? preferredCoverageEngine,
       );
-    window.__benchmarkCoverageRender = async (gridSizes = [64, 128, 256, 384]) => {
+    window.__benchmarkCoverageRender = async (gridSizes = [64, 128, 256, 384, 768, 1024]) => {
       if (!token) {
         return [];
       }
@@ -634,11 +635,11 @@ export function App() {
           await layer.updateAnalysis(request, debugMode);
           const cpu = layer.renderCpuReference();
           const gpu = layer.render(true);
-          const pixels = clampGridSize(gridSizePx) ** 2;
+          const pixels = clampGridSize(gridSizePx, maxGpuCoverageGridPx) ** 2;
           const cpuMs = cpu?.timings?.totalMs ?? null;
           const gpuMs = gpu?.timings?.totalMs ?? null;
           results.push({
-            gridSizePx: clampGridSize(gridSizePx),
+            gridSizePx: clampGridSize(gridSizePx, maxGpuCoverageGridPx),
             pixels,
             cpuMs,
             gpuMs,
@@ -911,6 +912,8 @@ export function App() {
     () => analysisRadiusM(analysis, debugMode),
     [analysis, debugMode],
   );
+  const maxSelectableGridPx =
+    preferredCoverageEngine === "gpu" ? maxGpuCoverageGridPx : maxCpuCoverageGridPx;
 
   useEffect(() => {
     if (!mapNodeRef.current || !hasToken) return;
@@ -1382,13 +1385,14 @@ export function App() {
             <input
               type="range"
               min={minCoverageGridPx}
-              max={maxCoverageGridPx}
+              max={maxSelectableGridPx}
               step="1"
-              value={analysis.gridSizePx}
+              value={Math.min(analysis.gridSizePx, maxSelectableGridPx)}
               onChange={(event) => setNumber("gridSizePx", Number(event.target.value))}
             />
             <output>
-              {analysis.gridSizePx} x {analysis.gridSizePx} pixels
+              {Math.min(analysis.gridSizePx, maxSelectableGridPx)} x{" "}
+              {Math.min(analysis.gridSizePx, maxSelectableGridPx)} pixels
             </output>
           </label>
 

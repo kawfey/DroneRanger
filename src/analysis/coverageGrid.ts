@@ -6,7 +6,9 @@ import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile } from "../
 
 export const coverageRaySteps = 48;
 export const minCoverageGridPx = 25;
-export const maxCoverageGridPx = 384;
+export const maxCpuCoverageGridPx = 384;
+export const maxGpuCoverageGridPx = 1024;
+export const maxCoverageGridPx = maxCpuCoverageGridPx;
 
 function altitudeAglM(requiredTargetAbsM: number, targetTerrainM: number): number {
   return Math.max(0, requiredTargetAbsM - targetTerrainM);
@@ -33,6 +35,7 @@ export type HeightField = {
 export function createCoverageGridSpec(
   request: AnalysisRequest,
   debugMode: DebugMode,
+  maxGridSizePx = maxCoverageGridPx,
 ): CoverageGridSpec {
   const radiusM = analysisRadiusM(request, debugMode);
   const bounds = analysisMercatorBounds(request, radiusM);
@@ -45,14 +48,14 @@ export function createCoverageGridSpec(
     debugMode,
     radiusM,
     bounds,
-    gridSizePx: clampGridSize(request.gridSizePx),
+    gridSizePx: clampGridSize(request.gridSizePx, maxGridSizePx),
     operatorMercator,
     operatorUv: mercatorToTextureUv(operatorMercator, bounds),
   };
 }
 
-export function clampGridSize(gridSizePx: number): number {
-  return Math.max(minCoverageGridPx, Math.min(maxCoverageGridPx, Math.round(gridSizePx)));
+export function clampGridSize(gridSizePx: number, maxGridSizePx = maxCoverageGridPx): number {
+  return Math.max(minCoverageGridPx, Math.min(maxGridSizePx, Math.round(gridSizePx)));
 }
 
 export function gridCellMercator(spec: CoverageGridSpec, x: number, y: number): WebMercator {
