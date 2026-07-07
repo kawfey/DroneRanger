@@ -60,7 +60,7 @@ export class BuildingHeightTileLoader {
         ...tileSet,
         polygons: await Promise.all(
           tileSet.tiles.map((tile) =>
-            this.loadParsedTile(tile).catch((error) => {
+            retryOnce(() => this.loadParsedTile(tile)).catch((error) => {
               console.warn(`Unable to load building tile ${tile.z}/${tile.x}/${tile.y}; continuing without it.`, error);
               return [];
             }),
@@ -127,6 +127,23 @@ export class BuildingHeightTileLoader {
     this.tileCache.set(key, promise);
     return promise;
   }
+}
+
+async function retryOnce<T>(load: () => Promise<T>): Promise<T> {
+  try {
+    return await load();
+  } catch (error) {
+    await delay(150);
+    try {
+      return await load();
+    } catch {
+      throw error;
+    }
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 }
 
 export function sampleBuildingHeightField(field: BuildingHeightField, point: WebMercator): number {

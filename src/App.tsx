@@ -984,6 +984,43 @@ export function App() {
     void refreshCoverageLayer(map, nextAnalysis, debugMode);
   };
 
+  useEffect(() => {
+    if (!analysis.includeVegetation || !token) {
+      return;
+    }
+    let cancelled = false;
+    const signature = vegetationFieldSignature(analysis, debugMode);
+    if (vegetationFieldRef.current?.signature === signature) {
+      return;
+    }
+    if (!vegetationTileLoaderRef.current) {
+      vegetationTileLoaderRef.current = new VegetationHeightTileLoader({
+        onWarning: setAnalysisWarning,
+      });
+    }
+    const radiusM = analysisRadiusM(analysis, debugMode);
+    const bounds = analysisMercatorBounds(analysis, radiusM);
+    const texturePx =
+      preferredCoverageEngine === "gpu"
+        ? gpuHeightTexturePxForGrid(analysis.gridSizePx)
+        : clampGridSize(analysis.gridSizePx);
+    void vegetationTileLoaderRef.current
+      .buildHeightField(bounds, texturePx, texturePx)
+      .then((field) => {
+        if (!cancelled && field.failedTileCount === 0) {
+          vegetationFieldRef.current = { signature, field };
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn("Vegetation CHM prewarm failed.", error);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [analysis, debugMode, preferredCoverageEngine]);
+
   const activeProfiles = useMemo(
     () => analysis.profiles.filter((profile) => analysis.selectedProfileIds.includes(profile.id)),
     [analysis.profiles, analysis.selectedProfileIds],
