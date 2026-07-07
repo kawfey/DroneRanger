@@ -54,7 +54,6 @@ select {
 .toolbar,
 .profiles {
   top: 16px;
-  width: min(360px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
   overflow: auto;
   padding: 14px;
@@ -63,10 +62,12 @@ select {
 
 .toolbar {
   left: 16px;
+  width: min(368px, calc(100vw - 32px));
 }
 
 .profiles {
   right: 16px;
+  width: min(382px, calc(100vw - 32px));
 }
 
 .panel-title {
@@ -130,6 +131,19 @@ label {
   font-weight: 700;
 }
 
+.toolbar > label,
+.config-menu > label,
+.renderer-row {
+  padding-top: 10px;
+  border-top: 1px solid rgba(23, 32, 42, 0.08);
+}
+
+.toolbar > .panel-title + label,
+.config-menu > summary + label {
+  border-top: 0;
+  padding-top: 0;
+}
+
 input[type="number"],
 select {
   width: 100%;
@@ -141,13 +155,40 @@ select {
   color: #17202a;
 }
 
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+}
+
 .input-with-unit {
   position: relative;
   display: block;
 }
 
+.compact-number {
+  width: 118px;
+}
+
+.tiny-number {
+  width: 102px;
+}
+
+input.tiny-number-input {
+  width: 64px;
+  min-height: 34px;
+  border: 1px solid rgba(23, 32, 42, 0.18);
+  border-radius: 6px;
+  padding: 0 6px;
+  background: #ffffff;
+  color: #17202a;
+}
+
 .input-with-unit input {
-  padding-right: 42px;
+  padding-right: 46px;
+}
+
+.toolbar .input-with-unit input {
+  padding-right: 30px;
 }
 
 .input-with-unit span {
@@ -190,6 +231,55 @@ output {
   grid-template-columns: repeat(3, 1fr);
 }
 
+.inline-control,
+.renderer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inline-control > span:first-child,
+.renderer-row > span:first-child {
+  min-width: 0;
+}
+
+.inline-control > span:first-child {
+  white-space: nowrap;
+}
+
+.inline-control.compact-inline,
+.renderer-row.compact-inline {
+  justify-content: flex-start;
+}
+
+.compact-select {
+  width: 138px;
+}
+
+.altitude-range-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px;
+  gap: 10px;
+  align-items: end;
+}
+
+.range-pair-label {
+  min-width: 0;
+}
+
+.range-pair {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.range-separator {
+  color: #61707d;
+  font-size: 0.76rem;
+  font-weight: 760;
+}
+
 .profile-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 8px;
@@ -205,6 +295,16 @@ output {
 
 .segmented.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.segmented.compact {
+  grid-template-columns: repeat(2, 68px);
+  margin-top: 0;
+}
+
+.segmented.mode-toggle {
+  grid-template-columns: repeat(2, 62px);
+  margin-top: 0;
 }
 
 .segmented button {
@@ -304,6 +404,29 @@ output {
 .config-menu input:disabled {
   color: #83909b;
   background: #eef2f3;
+}
+
+.calc-range-control {
+  display: grid;
+  gap: 6px;
+}
+
+.calc-range-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-number {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.renderer-row {
+  margin-top: 14px;
+  color: #334250;
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .check-row {

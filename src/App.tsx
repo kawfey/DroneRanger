@@ -1177,21 +1177,33 @@ export function App() {
         </div>
 
         <label>
-          Reference radius
+          <span className="inline-control">
+            <span>Reference radius</span>
+            <span className="input-with-unit compact-number">
+              <input
+                type="number"
+                min="0"
+                step="250"
+                value={analysis.radiusM}
+                onChange={(event) => setNumber("radiusM", Number(event.target.value))}
+              />
+              <span>m</span>
+            </span>
+          </span>
           <input
             type="range"
             min="250"
             max="10000"
             step="250"
-            value={analysis.radiusM}
+            value={Math.min(10000, Math.max(250, analysis.radiusM))}
             onChange={(event) => setNumber("radiusM", Number(event.target.value))}
           />
-          <output>{analysis.radiusM.toLocaleString()} m</output>
         </label>
 
         <label>
-          Operator antenna height
-          <span className="input-with-unit">
+          <span className="inline-control compact-inline">
+            <span>Operator antenna height</span>
+            <span className="input-with-unit tiny-number">
             <input
               type="number"
               min="0"
@@ -1205,151 +1217,164 @@ export function App() {
               }
             />
             <span>m</span>
+            </span>
           </span>
         </label>
 
-        <div className="grid-two">
-          <label>
-            Min alt
-            <span className="input-with-unit">
+        <div className="altitude-range-row">
+          <label className="range-pair-label">
+            Altitude range
+            <span className="range-pair">
+              <span className="input-with-unit tiny-number">
               <input
                 type="number"
                 value={analysis.altitude.minM}
                 onChange={(event) => setAltitude("minM", Number(event.target.value))}
               />
               <span>m</span>
-            </span>
-          </label>
-          <label>
-            Max alt
-            <span className="input-with-unit">
+              </span>
+              <span className="range-separator">to</span>
+              <span className="input-with-unit tiny-number">
               <input
                 type="number"
                 value={analysis.altitude.maxM}
                 onChange={(event) => setAltitude("maxM", Number(event.target.value))}
               />
               <span>m</span>
+              </span>
             </span>
+          </label>
+          <label>
+            Relative to
+            <select
+              value={analysis.altitudeCriterion}
+              onChange={(event) =>
+                setAnalysis((current) => ({
+                  ...current,
+                  altitudeCriterion: event.target.value as AnalysisRequest["altitudeCriterion"],
+                }))
+              }
+            >
+              <option value="elevation-change">Operator</option>
+              <option value="agl">Ground level</option>
+            </select>
           </label>
         </div>
 
         <label>
-          Coverage mode
-          <select
-            value={debugMode}
-            onChange={(event) => setDebugMode(event.target.value as DebugMode)}
-          >
-            {debugModes.map((mode) => (
-              <option key={mode.id} value={mode.id}>
-                {mode.label}
-              </option>
-            ))}
-          </select>
+          <span className="inline-control compact-inline">
+            <span>Coverage mode</span>
+            <select
+              className="compact-select"
+              value={debugMode}
+              onChange={(event) => setDebugMode(event.target.value as DebugMode)}
+            >
+              {debugModes.map((mode) => (
+                <option key={mode.id} value={mode.id}>
+                  {mode.label}
+                </option>
+              ))}
+            </select>
+          </span>
+        </label>
+
+        <label>
+          <span className="toggle-row">
+            <span>Building occlusion</span>
+            <input
+              type="checkbox"
+              checked={analysis.includeBuildings}
+              onChange={(event) =>
+                setAnalysis((current) => ({
+                  ...current,
+                  includeBuildings: event.target.checked,
+                }))
+              }
+            />
+          </span>
         </label>
 
         <details className="config-menu">
           <summary>
             <Settings size={16} />
-            <span>Calculation settings</span>
+            <span>Advanced settings</span>
             <ChevronDown className="disclosure-icon" size={16} />
           </summary>
 
-          <div className="segmented two" role="radiogroup" aria-label="Calculation range">
-            <button
-              type="button"
-              className={analysis.calculationRange.mode === "auto" ? "active" : ""}
-              onClick={() =>
-                setAnalysis((current) => ({
-                  ...current,
-                  calculationRange: { ...current.calculationRange, mode: "auto" },
-                }))
-              }
-            >
-              Auto
-            </button>
-            <button
-              type="button"
-              className={analysis.calculationRange.mode === "manual" ? "active" : ""}
-              onClick={() =>
-                setAnalysis((current) => ({
-                  ...current,
-                  calculationRange: { ...current.calculationRange, mode: "manual" },
-                }))
-              }
-            >
-              Manual
-            </button>
-          </div>
-
-          <div className="segmented two" role="radiogroup" aria-label="Altitude criterion">
-            <button
-              type="button"
-              className={analysis.altitudeCriterion === "elevation-change" ? "active" : ""}
-              onClick={() =>
-                setAnalysis((current) => ({
-                  ...current,
-                  altitudeCriterion: "elevation-change",
-                }))
-              }
-            >
-              Elev change
-            </button>
-            <button
-              type="button"
-              className={analysis.altitudeCriterion === "agl" ? "active" : ""}
-              onClick={() =>
-                setAnalysis((current) => ({
-                  ...current,
-                  altitudeCriterion: "agl",
-                }))
-              }
-            >
-              AGL
-            </button>
-          </div>
-
           <label>
-            Calculation range
-            <span className="input-with-unit">
-              <input
-                type="number"
-                min="250"
-                step="250"
-                value={analysis.calculationRange.manualM}
-                disabled={analysis.calculationRange.mode === "auto"}
-                onChange={(event) =>
-                  setAnalysis((current) => ({
-                    ...current,
-                    calculationRange: {
-                      mode: current.calculationRange.mode,
-                      manualM: Number(event.target.value),
-                    },
-                  }))
-                }
-              />
-              <span>m</span>
+            <span className="calc-range-control">
+              <span>Calculation range</span>
+              <span className="calc-range-actions">
+                <span className="input-with-unit range-number">
+                  <input
+                    type="number"
+                    min="250"
+                    step="250"
+                    value={
+                      analysis.calculationRange.mode === "auto"
+                        ? Math.round(effectiveCalculationRadiusM)
+                        : analysis.calculationRange.manualM
+                    }
+                    disabled={analysis.calculationRange.mode === "auto"}
+                    onChange={(event) =>
+                      setAnalysis((current) => ({
+                        ...current,
+                        calculationRange: {
+                          mode: current.calculationRange.mode,
+                          manualM: Number(event.target.value),
+                        },
+                      }))
+                    }
+                  />
+                  <span>m</span>
+                </span>
+                <span className="segmented mode-toggle" role="radiogroup" aria-label="Calculation range">
+                  <button
+                    type="button"
+                    className={analysis.calculationRange.mode === "auto" ? "active" : ""}
+                    onClick={() =>
+                      setAnalysis((current) => ({
+                        ...current,
+                        calculationRange: { ...current.calculationRange, mode: "auto" },
+                      }))
+                    }
+                  >
+                    Auto
+                  </button>
+                  <button
+                    type="button"
+                    className={analysis.calculationRange.mode === "manual" ? "active" : ""}
+                    onClick={() =>
+                      setAnalysis((current) => ({
+                        ...current,
+                        calculationRange: { ...current.calculationRange, mode: "manual" },
+                      }))
+                    }
+                  >
+                    Manual
+                  </button>
+                </span>
+              </span>
             </span>
-            <output>
-              {analysis.calculationRange.mode === "auto"
-                ? `${Math.round(effectiveCalculationRadiusM).toLocaleString()} m auto`
-                : `${Math.round(effectiveCalculationRadiusM).toLocaleString()} m manual`}
-            </output>
           </label>
 
           <label>
-            Color steps
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={analysis.colorSteps}
-              onChange={(event) =>
-                setAnalysis((current) => ({
-                  ...current,
-                  colorSteps: Math.max(1, Math.round(Number(event.target.value) || 1)),
-                }))
-              }
-            />
+            <span className="inline-control compact-inline">
+              <span>Color steps</span>
+              <input
+                className="tiny-number-input"
+                type="number"
+                min="1"
+                step="1"
+                value={analysis.colorSteps}
+                onChange={(event) =>
+                  setAnalysis((current) => ({
+                    ...current,
+                    colorSteps: Math.max(1, Math.round(Number(event.target.value) || 1)),
+                  }))
+                }
+              />
+            </span>
           </label>
 
           <label>
@@ -1367,42 +1392,26 @@ export function App() {
             </output>
           </label>
 
-          <div className="segmented two" role="radiogroup" aria-label="Coverage renderer">
-            <button
-              type="button"
-              className={preferredCoverageEngine === "cpu-fallback" ? "active" : ""}
-              onClick={() => setPreferredCoverageEngine("cpu-fallback")}
-            >
-              CPU
-            </button>
-            <button
-              type="button"
-              className={preferredCoverageEngine === "gpu" ? "active" : ""}
-              onClick={() => setPreferredCoverageEngine("gpu")}
-            >
-              GPU
-            </button>
+          <div className="renderer-row">
+            <span>Solver / Renderer</span>
+            <div className="segmented compact" role="radiogroup" aria-label="Coverage renderer">
+              <button
+                type="button"
+                className={preferredCoverageEngine === "cpu-fallback" ? "active" : ""}
+                onClick={() => setPreferredCoverageEngine("cpu-fallback")}
+              >
+                CPU
+              </button>
+              <button
+                type="button"
+                className={preferredCoverageEngine === "gpu" ? "active" : ""}
+                onClick={() => setPreferredCoverageEngine("gpu")}
+                title={`Current: ${coverageEngine === "gpu" ? "GPU" : "CPU"}`}
+              >
+                GPU
+              </button>
+            </div>
           </div>
-          <output>
-            {`Active renderer: ${coverageEngine === "gpu" ? "GPU" : "CPU"}`}
-          </output>
-
-          <label>
-            <span className="toggle-row">
-              <span>Building occlusion</span>
-              <input
-                type="checkbox"
-                checked={analysis.includeBuildings}
-                onChange={(event) =>
-                  setAnalysis((current) => ({
-                    ...current,
-                    includeBuildings: event.target.checked,
-                  }))
-                }
-              />
-            </span>
-            <output>Use Mapbox building heights as line-of-sight blockers</output>
-          </label>
         </details>
       </aside>
 
