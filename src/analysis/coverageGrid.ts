@@ -4,7 +4,7 @@ import { analysisRadiusM } from "./singleRay";
 import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "./rf";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile } from "../types";
 
-export const coverageRaySteps = 24;
+export const coverageRaySteps = 48;
 export const minCoverageGridPx = 25;
 export const maxCoverageGridPx = 384;
 
