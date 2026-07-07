@@ -1,10 +1,10 @@
 import { analysisMercatorBounds, mercatorToTextureUv, type MercatorBounds } from "./demTiles";
 import { haversineDistanceM, mercator01ToLngLat, type WebMercator } from "./coordinates";
-import { analysisRadiusM } from "./singleRay";
+import { analysisRadiusM, coverageRaySteps } from "./singleRay";
 import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "./rf";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile } from "../types";
 
-export const coverageRaySteps = 48;
+export { coverageRaySteps };
 export const minCoverageGridPx = 25;
 export const maxCpuCoverageGridPx = 384;
 export const maxGpuCoverageGridPx = 1024;

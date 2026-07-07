@@ -7,7 +7,7 @@ import { buildingHeightM } from "./buildings";
 import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "./rf";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile } from "../types";
 
-const raySteps = 24;
+export const coverageRaySteps = 48;
 const maxRfAnalysisRadiusM = 100000;
 
 function altitudeAglM(requiredTargetAbsM: number, targetTerrainM: number): number {
@@ -162,8 +162,8 @@ export function evaluateTerrainLosRay(
   let requiredTargetAbsM = minimumTargetAltitudeM(request, operatorAbsM, targetTerrain);
   let limitingObstacle: ObstacleSample["source"] | null = null;
 
-  for (let step = 1; step < raySteps; step++) {
-    const t = step / raySteps;
+  for (let step = 1; step < coverageRaySteps; step++) {
+    const t = step / coverageRaySteps;
     const sampleLngLat = mercator01ToLngLat({
       x: operatorMercator.x + (targetMercator.x - operatorMercator.x) * t,
       y: operatorMercator.y + (targetMercator.y - operatorMercator.y) * t,
@@ -197,7 +197,7 @@ export function inspectTerrainPixel(
   const los = evaluateTerrainLosRay(map, request, target);
   const criteria = criteriaFromLabel(pixel.violationCriteria);
   if (altitudeCriterionValue(request, los) > request.altitude.maxM) {
-    criteria.add(los.limitingObstacle === "building" ? "Building" : "Terrain");
+    criteria.add(obstacleCriteriaLabel(los.limitingObstacle));
   }
 
   const reachable = criteria.size === 0;
@@ -238,6 +238,16 @@ function terrainElevation(
 ): number {
   const elevation = map.queryTerrainElevation(lngLat, { exaggerated: false });
   return typeof elevation === "number" && Number.isFinite(elevation) ? elevation : 0;
+}
+
+function obstacleCriteriaLabel(obstacle: ObstacleSample["source"] | null): string {
+  if (obstacle === "building") {
+    return "Building";
+  }
+  if (obstacle === "vegetation") {
+    return "Vegetation";
+  }
+  return "Terrain";
 }
 
 function obstacleElevation(

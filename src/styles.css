@@ -492,7 +492,7 @@ output {
 
 .inspector dl {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) max-content;
   gap: 8px 14px;
   margin: 10px 0 0;
 }
@@ -503,8 +503,11 @@ output {
 }
 
 .inspector dd {
+  justify-self: end;
   margin: 0;
   font-weight: 760;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .hint {

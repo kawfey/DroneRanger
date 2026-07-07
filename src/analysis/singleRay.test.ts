@@ -123,6 +123,38 @@ describe("single ray inspector", () => {
     expect(inspected.violationCriteria).toBe("Building");
   });
 
+  it("reports vegetation blockers separately from terrain", () => {
+    const request = {
+      ...defaultAnalysis,
+      includeVegetation: true,
+      altitude: {
+        ...defaultAnalysis.altitude,
+        maxM: 60,
+      },
+      vegetation: {
+        ...defaultAnalysis.vegetation,
+        minCanopyHeightM: 1,
+      },
+    };
+    const target = {
+      lng: request.operator.lng + 0.01,
+      lat: request.operator.lat,
+    };
+    const canopyMap = {
+      queryTerrainElevation: () => 0,
+      queryVegetationHeightM: (lngLat: { lng: number }) =>
+        lngLat.lng > request.operator.lng + 0.004 && lngLat.lng < request.operator.lng + 0.006
+          ? 80
+          : 0,
+    };
+
+    const inspected = inspectTerrainPixel(canopyMap, request, target, "combined");
+
+    expect(inspected.requiredAltitudeM).toBeGreaterThan(request.altitude.maxM);
+    expect(inspected.reachable).toBe(false);
+    expect(inspected.violationCriteria).toBe("Vegetation");
+  });
+
   it("distinguishes manual range cutoffs from RF-derived auto limits", () => {
     const target = {
       lng: defaultAnalysis.operator.lng + 0.01,

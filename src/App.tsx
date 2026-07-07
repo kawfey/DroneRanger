@@ -857,10 +857,10 @@ export function App() {
       if (buildingFieldRef.current?.signature !== signature) {
         const radiusM = analysisRadiusM(request, mode);
         const bounds = analysisMercatorBounds(request, radiusM);
-        const gridSize = clampGridSize(request.gridSizePx);
+        const texturePx = gpuHeightTexturePxForGrid(request.gridSizePx);
         buildingFieldRef.current = {
           signature,
-          field: await buildingTileLoaderRef.current.buildHeightField(bounds, gridSize, gridSize),
+          field: await buildingTileLoaderRef.current.buildHeightField(bounds, texturePx, texturePx),
         };
       }
       buildingField = buildingFieldRef.current.field;
@@ -878,9 +878,9 @@ export function App() {
       if (vegetationFieldRef.current?.signature !== signature) {
         const radiusM = analysisRadiusM(request, mode);
         const bounds = analysisMercatorBounds(request, radiusM);
-        const gridSize = clampGridSize(request.gridSizePx);
+        const texturePx = gpuHeightTexturePxForGrid(request.gridSizePx);
         try {
-          const field = await vegetationTileLoaderRef.current.buildHeightField(bounds, gridSize, gridSize);
+          const field = await vegetationTileLoaderRef.current.buildHeightField(bounds, texturePx, texturePx);
           vegetationFieldRef.current = field.failedTileCount > 0 ? null : { signature, field };
           vegetationField = field;
         } catch (error) {
