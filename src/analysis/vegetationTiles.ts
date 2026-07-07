@@ -34,7 +34,12 @@ type FastRemoteSourceOptions = Parameters<typeof fromUrl>[1] & {
 export const metaChmZoom = 10;
 export const maxVegetationTiles = 64;
 export const metaChmBaseUrl = "https://data.source.coop/tge-labs/meta-chm-v2/chm";
-const preferredOverviewImageIndex = 7;
+const metaChmOverviewImages = [
+  { index: 7, sizePx: 512 },
+  { index: 6, sizePx: 1024 },
+  { index: 5, sizePx: 2048 },
+  { index: 4, sizePx: 4096 },
+] as const;
 const remoteCogBlockSizeBytes = 256 * 1024;
 
 export class VegetationHeightTileLoader {
@@ -47,11 +52,12 @@ export class VegetationHeightTileLoader {
     if (tileIds.length > maxVegetationTiles) {
       throw new Error(`Vegetation analysis skipped because it intersects ${tileIds.length} CHM tiles`);
     }
+    const targetOverviewPx = targetOverviewSizePx(width, height);
     const tileResults = await Promise.all(
       tileIds.map(async (tile) => {
         const url = metaChmTileUrl(tile);
         try {
-          return { tile, url, decoded: await this.loadTile(tile) };
+          return { tile, url, decoded: await this.loadTile(tile, targetOverviewPx) };
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           return { tile, url, decoded: null, error: detail };
@@ -99,14 +105,14 @@ export class VegetationHeightTileLoader {
     };
   }
 
-  private loadTile(tile: DemTileId): Promise<DecodedVegetationTile> {
-    const key = tileKey(tile);
+  private loadTile(tile: DemTileId, targetOverviewPx: number): Promise<DecodedVegetationTile> {
+    const key = `${tileKey(tile)}@${targetOverviewPx}`;
     const cached = this.tileCache.get(key);
     if (cached) {
       return cached;
     }
     const url = metaChmTileUrl(tile);
-    const promise = (this.options.loadTile ? this.options.loadTile(tile, url) : loadMetaChmTile(url)).catch((error) => {
+    const promise = (this.options.loadTile ? this.options.loadTile(tile, url) : loadMetaChmTile(url, targetOverviewPx)).catch((error) => {
       this.tileCache.delete(key);
       throw error;
     });
@@ -142,14 +148,22 @@ export function tileToQuadkey(tile: DemTileId): string {
   return quadkey;
 }
 
-async function loadMetaChmTile(url: string): Promise<DecodedVegetationTile> {
+function targetOverviewSizePx(width: number, height: number): number {
+  const target = Math.max(width, height);
+  if (target <= 256) return 512;
+  if (target <= 512) return 1024;
+  if (target <= 1024) return 2048;
+  return 4096;
+}
+
+async function loadMetaChmTile(url: string, targetOverviewPx: number): Promise<DecodedVegetationTile> {
   const fastRemoteOptions: FastRemoteSourceOptions = {
     blockSize: remoteCogBlockSizeBytes,
     cacheSize: 50,
     maxRanges: 16,
   };
   const tiff = await fromUrl(url, fastRemoteOptions);
-  const image = await preferredReadableImage(tiff);
+  const image = await preferredReadableImage(tiff, targetOverviewPx);
   const width = image.getWidth();
   const height = image.getHeight();
   const raster = await image.readRasters({ samples: [0], interleave: true });
@@ -160,10 +174,11 @@ async function loadMetaChmTile(url: string): Promise<DecodedVegetationTile> {
   };
 }
 
-async function preferredReadableImage(tiff: Awaited<ReturnType<typeof fromUrl>>) {
+async function preferredReadableImage(tiff: Awaited<ReturnType<typeof fromUrl>>, targetOverviewPx: number) {
+  const preferred = metaChmOverviewImages.find((overview) => overview.sizePx >= targetOverviewPx) ?? metaChmOverviewImages[metaChmOverviewImages.length - 1];
   try {
-    const image = await tiff.getImage(preferredOverviewImageIndex);
-    if (image.getWidth() <= 1024 && image.getHeight() <= 1024) {
+    const image = await tiff.getImage(preferred.index);
+    if (image.getWidth() <= preferred.sizePx && image.getHeight() <= preferred.sizePx) {
       return image;
     }
   } catch {
