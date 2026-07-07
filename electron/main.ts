@@ -225,12 +225,14 @@ async function promptForMapboxToken(): Promise<string> {
 }
 
 async function createWindow() {
-  const mapboxToken = isDevelopment() ? "" : await promptForMapboxToken();
+  const isDev = isDevelopment();
+  const mapboxToken = isDev ? "" : await promptForMapboxToken();
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 960,
     minHeight: 640,
+    autoHideMenuBar: !isDev,
     title: appName,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -243,6 +245,11 @@ async function createWindow() {
       ],
     },
   });
+
+  if (!isDev) {
+    mainWindow.setMenu(null);
+    mainWindow.setMenuBarVisibility(false);
+  }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (shouldOpenExternally(url)) {
@@ -264,7 +271,7 @@ async function createWindow() {
     }
   });
 
-  if (isDevelopment()) {
+  if (isDev) {
     await mainWindow.loadURL(devServerUrl);
     mainWindow.webContents.openDevTools({ mode: "detach" });
     return;
