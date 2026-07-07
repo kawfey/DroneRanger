@@ -33,7 +33,7 @@ type BuildingTileLoaderOptions = {
 
 const preferredBuildingZoom = 15;
 const minBuildingZoom = 12;
-const maxBuildingTiles = 96;
+const maxBuildingTiles = 256;
 
 export class BuildingHeightTileLoader {
   private readonly tileCache = new Map<string, Promise<ArrayBuffer>>();
