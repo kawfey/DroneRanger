@@ -20,6 +20,7 @@ export type TerrainSampler = {
     options?: { exaggerated: boolean },
   ): number | null | undefined;
   queryBuildingHeightM?(lngLat: { lng: number; lat: number }): number;
+  queryVegetationHeightM?(lngLat: { lng: number; lat: number }): number;
   project?(lngLat: { lng: number; lat: number }): { x: number; y: number };
   getLayer?(id: string): unknown;
   queryRenderedFeatures?(
@@ -30,7 +31,7 @@ export type TerrainSampler = {
 
 type ObstacleSample = {
   elevationM: number;
-  source: "terrain" | "building";
+  source: "terrain" | "building" | "vegetation";
 };
 
 export type LosRayResult = {
@@ -245,11 +246,18 @@ function obstacleElevation(
   lngLat: { lng: number; lat: number },
   terrainM: number,
 ): ObstacleSample {
+  const canopyM =
+    request.includeVegetation && map.queryVegetationHeightM
+      ? Math.max(0, map.queryVegetationHeightM(lngLat))
+      : 0;
+  const effectiveCanopyM = canopyM >= request.vegetation.minCanopyHeightM ? canopyM : 0;
+
   if (request.includeBuildings && map.queryBuildingHeightM) {
     const buildingM = map.queryBuildingHeightM(lngLat);
+    const obstructionM = Math.max(buildingM, effectiveCanopyM);
     return {
-      elevationM: terrainM + buildingM,
-      source: buildingM > 0 ? "building" : "terrain",
+      elevationM: terrainM + obstructionM,
+      source: obstructionM === effectiveCanopyM && effectiveCanopyM > buildingM ? "vegetation" : buildingM > 0 ? "building" : "terrain",
     };
   }
 
@@ -259,7 +267,10 @@ function obstacleElevation(
     !map.getLayer?.("los-building-reference") ||
     !map.queryRenderedFeatures
   ) {
-    return { elevationM: terrainM, source: "terrain" };
+    return {
+      elevationM: terrainM + effectiveCanopyM,
+      source: effectiveCanopyM > 0 ? "vegetation" : "terrain",
+    };
   }
 
   try {
@@ -270,12 +281,16 @@ function obstacleElevation(
       (height, feature) => Math.max(height, buildingHeightM(feature)),
       0,
     );
+    const obstructionM = Math.max(buildingM, effectiveCanopyM);
     return {
-      elevationM: terrainM + buildingM,
-      source: buildingM > 0 ? "building" : "terrain",
+      elevationM: terrainM + obstructionM,
+      source: obstructionM === effectiveCanopyM && effectiveCanopyM > buildingM ? "vegetation" : buildingM > 0 ? "building" : "terrain",
     };
   } catch {
-    return { elevationM: terrainM, source: "terrain" };
+    return {
+      elevationM: terrainM + effectiveCanopyM,
+      source: effectiveCanopyM > 0 ? "vegetation" : "terrain",
+    };
   }
 }
 

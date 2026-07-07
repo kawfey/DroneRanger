@@ -38,6 +38,11 @@ import {
   sampleBuildingHeightField,
   type BuildingHeightField,
 } from "./analysis/buildingTiles";
+import {
+  VegetationHeightTileLoader,
+  sampleVegetationHeightField,
+  type VegetationHeightField,
+} from "./analysis/vegetationTiles";
 import { shadeForPixel } from "./analysis/coverageShading";
 import {
   lngLatToMercator01,
@@ -114,6 +119,11 @@ let coverageSourceCanvas: HTMLCanvasElement | null = null;
 type CachedBuildingField = {
   signature: string;
   field: BuildingHeightField;
+};
+
+type CachedVegetationField = {
+  signature: string;
+  field: VegetationHeightField;
 };
 
 type CachedTerrainField = {
@@ -549,6 +559,8 @@ export function App() {
   const terrainFieldRef = useRef<CachedTerrainField | null>(null);
   const buildingTileLoaderRef = useRef<BuildingHeightTileLoader | null>(null);
   const buildingFieldRef = useRef<CachedBuildingField | null>(null);
+  const vegetationTileLoaderRef = useRef<VegetationHeightTileLoader | null>(null);
+  const vegetationFieldRef = useRef<CachedVegetationField | null>(null);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
   const previousStyleUriRef = useRef(defaultMapStyle.uri);
   const refreshCoverageRef = useRef<(map: mapboxgl.Map, analysis: AnalysisRequest) => void>(() => undefined);
@@ -563,10 +575,28 @@ export function App() {
   const [selectedStyleId, setSelectedStyleId] = useState(defaultMapStyle.id);
   const [isStyleMenuOpen, setIsStyleMenuOpen] = useState(false);
   const [mapCamera, setMapCamera] = useState({ bearing: 0, pitch: 0 });
+  const [analysisWarning, setAnalysisWarning] = useState<string | null>(null);
+  const hadVegetationWarningRef = useRef(false);
   const hasToken = Boolean(token && token !== "your_mapbox_token_here");
   const selectedStyle = mapStyleTemplates.find((style) => style.id === selectedStyleId) ?? defaultMapStyle;
   const latestAnalysisRef = useRef(analysis);
   const latestCoverageFootprintRef = useRef(coverageFootprintKey(analysis, debugMode));
+
+  useEffect(() => {
+    if (analysisWarning?.includes("Vegetation CHM")) {
+      hadVegetationWarningRef.current = true;
+    }
+  }, [analysisWarning]);
+
+  useEffect(() => {
+    if (!analysis.includeVegetation && hadVegetationWarningRef.current) {
+      gpuCoverageRef.current?.dispose();
+      gpuCoverageRef.current = null;
+      gpuCoverageTexturePxRef.current = null;
+      vegetationFieldRef.current = null;
+      hadVegetationWarningRef.current = false;
+    }
+  }, [analysis.includeVegetation]);
 
   function updateDebugState(patch: Partial<DroneRangeDebugState> = {}) {
     if (!import.meta.env.DEV) return;
@@ -752,14 +782,31 @@ export function App() {
     ].join(":");
   }
 
+  function vegetationFieldSignature(request: AnalysisRequest, mode: DebugMode): string {
+    const radiusM = analysisRadiusM(request, mode);
+    const bounds = analysisMercatorBounds(request, radiusM);
+    const texturePx = gpuHeightTexturePxForGrid(request.gridSizePx);
+    return [
+      texturePx,
+      bounds.west.toFixed(8),
+      bounds.north.toFixed(8),
+      bounds.east.toFixed(8),
+      bounds.south.toFixed(8),
+    ].join(":");
+  }
+
   function fixedOcclusionSampler(
     terrainField: TerrainHeightField,
     buildingField: BuildingHeightField | null,
+    vegetationField: VegetationHeightField | null,
   ): TerrainSampler {
     return {
       queryTerrainElevation: (lngLat) => sampleHeightField(terrainField, lngLatToMercator01(lngLat.lng, lngLat.lat)),
       queryBuildingHeightM: buildingField
         ? (lngLat) => sampleBuildingHeightField(buildingField, lngLatToMercator01(lngLat.lng, lngLat.lat))
+        : undefined,
+      queryVegetationHeightM: vegetationField
+        ? (lngLat) => sampleVegetationHeightField(vegetationField, lngLatToMercator01(lngLat.lng, lngLat.lat))
         : undefined,
     };
   }
@@ -800,39 +847,71 @@ export function App() {
     }
     if (!request.includeBuildings) {
       buildingFieldRef.current = null;
-      return fixedOcclusionSampler(terrainField, null);
     }
-    if (!buildingTileLoaderRef.current) {
+    let buildingField: BuildingHeightField | null = null;
+    if (request.includeBuildings && !buildingTileLoaderRef.current) {
       buildingTileLoaderRef.current = new BuildingHeightTileLoader(token);
     }
-    const signature = buildingFieldSignature(request, mode);
-    if (buildingFieldRef.current?.signature !== signature) {
-      const radiusM = analysisRadiusM(request, mode);
-      const bounds = analysisMercatorBounds(request, radiusM);
-      const gridSize = clampGridSize(request.gridSizePx);
-      buildingFieldRef.current = {
-        signature,
-        field: await buildingTileLoaderRef.current.buildHeightField(bounds, gridSize, gridSize),
-      };
+    if (request.includeBuildings && buildingTileLoaderRef.current) {
+      const signature = buildingFieldSignature(request, mode);
+      if (buildingFieldRef.current?.signature !== signature) {
+        const radiusM = analysisRadiusM(request, mode);
+        const bounds = analysisMercatorBounds(request, radiusM);
+        const gridSize = clampGridSize(request.gridSizePx);
+        buildingFieldRef.current = {
+          signature,
+          field: await buildingTileLoaderRef.current.buildHeightField(bounds, gridSize, gridSize),
+        };
+      }
+      buildingField = buildingFieldRef.current.field;
     }
-    return fixedOcclusionSampler(terrainField, buildingFieldRef.current.field);
+    let vegetationField: VegetationHeightField | null = null;
+    if (!request.includeVegetation) {
+      vegetationFieldRef.current = null;
+    } else {
+      if (!vegetationTileLoaderRef.current) {
+        vegetationTileLoaderRef.current = new VegetationHeightTileLoader({
+          onWarning: setAnalysisWarning,
+        });
+      }
+      const signature = vegetationFieldSignature(request, mode);
+      if (vegetationFieldRef.current?.signature !== signature) {
+        const radiusM = analysisRadiusM(request, mode);
+        const bounds = analysisMercatorBounds(request, radiusM);
+        const gridSize = clampGridSize(request.gridSizePx);
+        try {
+          const field = await vegetationTileLoaderRef.current.buildHeightField(bounds, gridSize, gridSize);
+          vegetationFieldRef.current = field.failedTileCount > 0 ? null : { signature, field };
+          vegetationField = field;
+        } catch (error) {
+          console.warn("Vegetation CHM unavailable; continuing without canopy occlusion.", error);
+          setAnalysisWarning(
+            error instanceof Error ? error.message : "Vegetation CHM unavailable; continuing without canopy occlusion.",
+          );
+          vegetationFieldRef.current = null;
+        }
+      }
+      vegetationField = vegetationField ?? vegetationFieldRef.current?.field ?? null;
+    }
+    return fixedOcclusionSampler(terrainField, buildingField, vegetationField);
   }
 
   const coverageEngineLabel =
     coverageEngine === "gpu"
-      ? analysis.includeBuildings
-        ? "GPU terrain + buildings"
+      ? analysis.includeBuildings || analysis.includeVegetation
+        ? `GPU terrain + ${[analysis.includeBuildings ? "buildings" : "", analysis.includeVegetation ? "canopy" : ""].filter(Boolean).join(" + ")}`
         : "GPU terrain"
-      : analysis.includeBuildings && preferredCoverageEngine === "gpu"
+      : (analysis.includeBuildings || analysis.includeVegetation) && preferredCoverageEngine === "gpu"
         ? "CPU fallback"
         : preferredCoverageEngine === "gpu"
           ? "CPU fallback"
-          : analysis.includeBuildings
-        ? "CPU buildings"
+          : analysis.includeBuildings || analysis.includeVegetation
+        ? `CPU ${[analysis.includeBuildings ? "buildings" : "", analysis.includeVegetation ? "canopy" : ""].filter(Boolean).join(" + ")}`
         : "CPU fallback";
 
   async function refreshCoverageLayer(map: mapboxgl.Map, nextAnalysis: AnalysisRequest, nextDebugMode: DebugMode) {
     const sequence = ++coverageRenderSeqRef.current;
+    setAnalysisWarning(null);
     setMapboxTerrainEnabled(map, shouldUseMapboxTerrain());
     if (token) {
       try {
@@ -848,6 +927,7 @@ export function App() {
             mapboxToken,
             texturePx,
             coordinatesForAnalysis: coverageImageCoordinates,
+            onWarning: setAnalysisWarning,
           });
           gpuCoverageTexturePxRef.current = gpuCoverageRef.current ? texturePx : null;
         }
@@ -1296,12 +1376,55 @@ export function App() {
           </span>
         </label>
 
+        <label>
+          <span className="toggle-row">
+            <span>Vegetation occlusion</span>
+            <input
+              type="checkbox"
+              checked={analysis.includeVegetation}
+              onChange={(event) =>
+                setAnalysis((current) => ({
+                  ...current,
+                  includeVegetation: event.target.checked,
+                }))
+              }
+            />
+          </span>
+        </label>
+
+        {analysisWarning ? <div className="analysis-warning">{analysisWarning}</div> : null}
+
         <details className="config-menu">
           <summary>
             <Settings size={16} />
             <span>Advanced settings</span>
             <ChevronDown className="disclosure-icon" size={16} />
           </summary>
+
+          <label>
+            <span className="inline-control compact-inline">
+              <span>Min canopy height</span>
+              <span className="input-with-unit tiny-number">
+                <input
+                  className="tiny-number-input"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={analysis.vegetation.minCanopyHeightM}
+                  onChange={(event) =>
+                    setAnalysis((current) => ({
+                      ...current,
+                      vegetation: {
+                        ...current.vegetation,
+                        minCanopyHeightM: Number(event.target.value),
+                      },
+                    }))
+                  }
+                />
+                <span>m</span>
+              </span>
+            </span>
+          </label>
 
           <label>
             <span className="calc-range-control">

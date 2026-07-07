@@ -17,6 +17,8 @@ import {
   type HeightField,
 } from "./analysis/coverageGrid";
 import { BuildingHeightTileLoader } from "./analysis/buildingTiles";
+import { combineObstacleElevations } from "./analysis/obstructions";
+import { VegetationHeightTileLoader, type VegetationHeightField } from "./analysis/vegetationTiles";
 import { plotCoverageGridData } from "./analysis/coveragePlot";
 import { analysisRadiusM } from "./analysis/singleRay";
 import { combinedMaxFreeSpaceRangeM, maxFreeSpaceRangeM } from "./analysis/rf";
@@ -34,6 +36,7 @@ export type GpuCoverageLayerOptions = {
   mapboxToken: string;
   texturePx: number;
   coordinatesForAnalysis: (operator: AnalysisRequest["operator"], radiusM: number) => CoverageCoordinates;
+  onWarning?: (message: string) => void;
 };
 
 type DecodedTile = {
@@ -269,6 +272,7 @@ export class GpuCoverageLayer {
   private readonly gpuCanvas: HTMLCanvasElement;
   private readonly tileCache = new Map<string, Promise<DecodedTile>>();
   private readonly buildingTileLoader: BuildingHeightTileLoader;
+  private readonly vegetationTileLoader: VegetationHeightTileLoader;
   private analysis: AnalysisRequest | null = null;
   private debugMode: DebugMode = "combined";
   private bounds: MercatorBounds | null = null;
@@ -316,6 +320,9 @@ export class GpuCoverageLayer {
     this.cpuCanvas = document.createElement("canvas");
     this.gpuCanvas = document.createElement("canvas");
     this.buildingTileLoader = new BuildingHeightTileLoader(options.mapboxToken);
+    this.vegetationTileLoader = new VegetationHeightTileLoader({
+      onWarning: (message) => this.options.onWarning?.(message),
+    });
     this.initNumericTarget();
     this.initGeometry(this.numericProgram);
     this.initGeometry(this.colorProgram);
@@ -338,7 +345,9 @@ export class GpuCoverageLayer {
     this.demZoom = z;
     const signature = [
       z,
-      analysis.includeBuildings ? "buildings" : "terrain",
+      analysis.includeBuildings ? "buildings" : "no-buildings",
+      analysis.includeVegetation ? "vegetation" : "no-vegetation",
+      analysis.vegetation.minCanopyHeightM.toFixed(2),
       bounds.west.toFixed(8),
       bounds.north.toFixed(8),
       bounds.east.toFixed(8),
@@ -362,9 +371,10 @@ export class GpuCoverageLayer {
     let buildingRasterizeMs: number | undefined;
     let combineMs: number | undefined;
     let obstacleData: Float32Array | null = null;
-    if (analysis.includeBuildings) {
+    let obstacleHadVegetationFailures = false;
+    if (analysis.includeBuildings || analysis.includeVegetation) {
       const buildingBuildStartedAt = performance.now();
-      const obstacle = await this.buildObstacleTexture(bounds, heightData);
+      const obstacle = await this.buildObstacleTexture(analysis, bounds, heightData);
       if (updateVersion !== this.updateVersion) {
         return false;
       }
@@ -372,13 +382,14 @@ export class GpuCoverageLayer {
       buildingFetchParseMs = obstacle.fetchParseMs;
       buildingRasterizeMs = obstacle.rasterizeMs;
       combineMs = obstacle.combineMs;
+      obstacleHadVegetationFailures = obstacle.vegetationFailedTileCount > 0;
       buildingBuildMs = performance.now() - buildingBuildStartedAt;
     }
     const demUploadStartedAt = performance.now();
     this.bounds = bounds;
     this.heightData = heightData;
     this.obstacleData = obstacleData;
-    this.demSignature = signature;
+    this.demSignature = obstacleHadVegetationFailures ? "" : signature;
     this.demZoom = z;
     this.uploadHeightTexture(heightData, obstacleData);
     const demUploadMs = performance.now() - demUploadStartedAt;
@@ -671,21 +682,46 @@ export class GpuCoverageLayer {
   }
 
   private async buildObstacleTexture(
+    analysis: AnalysisRequest,
     bounds: MercatorBounds,
     terrainData: Float32Array,
-  ): Promise<{ obstacleData: Float32Array; fetchParseMs: number; rasterizeMs: number; combineMs: number }> {
+  ): Promise<{
+    obstacleData: Float32Array;
+    fetchParseMs: number;
+    rasterizeMs: number;
+    combineMs: number;
+    vegetationFailedTileCount: number;
+  }> {
     const texturePx = this.options.texturePx;
-    const buildingField = await this.buildingTileLoader.buildHeightField(bounds, texturePx, texturePx);
-    const output = new Float32Array(terrainData.length);
-    const combineStartedAt = performance.now();
-    for (let index = 0; index < output.length; index++) {
-      output[index] = (terrainData[index] ?? 0) + (buildingField.buildingHeightsM[index] ?? 0);
+    const buildingField = analysis.includeBuildings
+      ? await this.buildingTileLoader.buildHeightField(bounds, texturePx, texturePx)
+      : null;
+    let vegetationField: VegetationHeightField | null = null;
+    if (analysis.includeVegetation) {
+      try {
+        vegetationField = await this.vegetationTileLoader.buildHeightField(bounds, texturePx, texturePx);
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Vegetation CHM unavailable; continuing without canopy occlusion.";
+        console.warn("Vegetation CHM unavailable; continuing without canopy occlusion.", error);
+        this.options.onWarning?.(message);
+      }
     }
+    const combineStartedAt = performance.now();
+    const output = combineObstacleElevations(
+      terrainData,
+      buildingField?.buildingHeightsM,
+      vegetationField?.canopyHeightsM,
+      analysis.vegetation.minCanopyHeightM,
+    );
     return {
       obstacleData: output,
-      fetchParseMs: buildingField.fetchParseMs,
-      rasterizeMs: buildingField.rasterizeMs,
+      fetchParseMs: buildingField?.fetchParseMs ?? 0,
+      rasterizeMs: buildingField?.rasterizeMs ?? 0,
       combineMs: performance.now() - combineStartedAt,
+      vegetationFailedTileCount: vegetationField?.failedTileCount ?? 0,
     };
   }
 

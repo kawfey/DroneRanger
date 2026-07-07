@@ -58,7 +58,14 @@ export class BuildingHeightTileLoader {
     const parsedTileSets = await Promise.all(
       tileSets.map(async (tileSet) => ({
         ...tileSet,
-        polygons: await Promise.all(tileSet.tiles.map((tile) => this.loadParsedTile(tile))),
+        polygons: await Promise.all(
+          tileSet.tiles.map((tile) =>
+            this.loadParsedTile(tile).catch((error) => {
+              console.warn(`Unable to load building tile ${tile.z}/${tile.x}/${tile.y}; continuing without it.`, error);
+              return [];
+            }),
+          ),
+        ),
       })),
     );
     const fetchParseMs = performance.now() - fetchParseStartedAt;
@@ -87,7 +94,12 @@ export class BuildingHeightTileLoader {
     if (cached) {
       return cached;
     }
-    const promise = this.loadTile(tile).then((data) => (this.options.parseTile ?? parseBuildingTile)(data, tile));
+    const promise = this.loadTile(tile)
+      .then((data) => (this.options.parseTile ?? parseBuildingTile)(data, tile))
+      .catch((error) => {
+        this.parsedTileCache.delete(key);
+        throw error;
+      });
     this.parsedTileCache.set(key, promise);
     return promise;
   }
@@ -101,14 +113,17 @@ export class BuildingHeightTileLoader {
     const url = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/${tile.z}/${tile.x}/${tile.y}.vector.pbf?access_token=${encodeURIComponent(
       this.mapboxToken,
     )}`;
-    const promise = this.options.fetchTile
+    const promise = (this.options.fetchTile
       ? this.options.fetchTile(tile, url)
       : fetch(url).then((response) => {
           if (!response.ok) {
             throw new Error(`Unable to load building tile ${key}: ${response.status}`);
           }
           return response.arrayBuffer();
-        });
+        })).catch((error) => {
+      this.tileCache.delete(key);
+      throw error;
+    });
     this.tileCache.set(key, promise);
     return promise;
   }

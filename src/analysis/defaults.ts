@@ -60,4 +60,8 @@ export const defaultAnalysis: AnalysisRequest = {
   profiles: defaultProfiles,
   selectedProfileIds: ["control", "telemetry", "video"],
   includeBuildings: false,
+  includeVegetation: false,
+  vegetation: {
+    minCanopyHeightM: 2,
+  },
 };

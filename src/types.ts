@@ -43,6 +43,10 @@ export type AnalysisRequest = {
   profiles: LinkProfile[];
   selectedProfileIds: LinkProfileId[];
   includeBuildings: boolean;
+  includeVegetation: boolean;
+  vegetation: {
+    minCanopyHeightM: number;
+  };
 };
 
 export type DebugMode =

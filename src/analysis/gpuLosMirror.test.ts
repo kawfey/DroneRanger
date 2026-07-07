@@ -34,6 +34,22 @@ describe("shader-equivalent LOS mirror", () => {
     expect(blocked.requiredAltitudeM).toBeGreaterThan(result.requiredAltitudeM);
   });
 
+  it("raises required altitude behind a canopy obstacle in the obstruction channel", () => {
+    const { result, field, spec, targetMercator } = evaluateEastCell({
+      ...defaultAnalysis,
+      includeVegetation: true,
+    });
+    const obstacleElevations = new Float32Array(field.elevations);
+    for (let y = 0; y < spec.gridSizePx; y++) {
+      obstacleElevations[y * spec.gridSizePx + 18] = 30;
+    }
+    field.obstacleElevations = obstacleElevations;
+
+    const blocked = evaluateHeightFieldLosRay(spec, field, targetMercator);
+
+    expect(blocked.requiredAltitudeM).toBeGreaterThan(result.requiredAltitudeM);
+  });
+
   it("marks terrain that exceeds the configured altitude as unreachable", () => {
     const request = {
       ...defaultAnalysis,
