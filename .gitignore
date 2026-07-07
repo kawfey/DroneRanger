@@ -30,7 +30,7 @@ pnpm-debug.log*
 dist/
 dist-electron/
 build/
-release/
+release*/
 .vite/
 .next/
 coverage/
