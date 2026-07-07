@@ -69,11 +69,19 @@ export type CoverageOverlay = {
 
 export type CoverageTimings = {
   totalMs: number;
+  actionToOverlayMs?: number;
   updateAnalysisMs?: number;
   renderMs?: number;
   demBuildMs?: number;
   buildingBuildMs?: number;
+  buildingFetchParseMs?: number;
+  buildingRasterizeMs?: number;
+  combineMs?: number;
   demUploadMs?: number;
+  overlayApplyMs?: number;
+  displayCopyMs?: number;
+  mapSourceUpdateMs?: number;
+  fingerprintMs?: number;
   cpuSolveMs?: number;
   cpuShadeMs?: number;
   gpuDrawMs?: number;

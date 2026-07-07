@@ -355,17 +355,24 @@ export class GpuCoverageLayer {
     if (updateVersion !== this.updateVersion) {
       return false;
     }
+    const demBuildMs = performance.now() - demBuildStartedAt;
     let buildingBuildMs: number | undefined;
+    let buildingFetchParseMs: number | undefined;
+    let buildingRasterizeMs: number | undefined;
+    let combineMs: number | undefined;
     let obstacleData: Float32Array | null = null;
     if (analysis.includeBuildings) {
       const buildingBuildStartedAt = performance.now();
-      obstacleData = await this.buildObstacleTexture(bounds, heightData);
+      const obstacle = await this.buildObstacleTexture(bounds, heightData);
       if (updateVersion !== this.updateVersion) {
         return false;
       }
+      obstacleData = obstacle.obstacleData;
+      buildingFetchParseMs = obstacle.fetchParseMs;
+      buildingRasterizeMs = obstacle.rasterizeMs;
+      combineMs = obstacle.combineMs;
       buildingBuildMs = performance.now() - buildingBuildStartedAt;
     }
-    const demBuildMs = performance.now() - demBuildStartedAt;
     const demUploadStartedAt = performance.now();
     this.bounds = bounds;
     this.heightData = heightData;
@@ -377,6 +384,9 @@ export class GpuCoverageLayer {
     this.lastUpdateTimings = {
       demBuildMs,
       buildingBuildMs,
+      buildingFetchParseMs,
+      buildingRasterizeMs,
+      combineMs,
       demUploadMs,
       updateAnalysisMs: performance.now() - startedAt,
     };
@@ -659,14 +669,23 @@ export class GpuCoverageLayer {
     return output;
   }
 
-  private async buildObstacleTexture(bounds: MercatorBounds, terrainData: Float32Array): Promise<Float32Array> {
+  private async buildObstacleTexture(
+    bounds: MercatorBounds,
+    terrainData: Float32Array,
+  ): Promise<{ obstacleData: Float32Array; fetchParseMs: number; rasterizeMs: number; combineMs: number }> {
     const texturePx = this.options.texturePx;
     const buildingField = await this.buildingTileLoader.buildHeightField(bounds, texturePx, texturePx);
     const output = new Float32Array(terrainData.length);
+    const combineStartedAt = performance.now();
     for (let index = 0; index < output.length; index++) {
       output[index] = (terrainData[index] ?? 0) + (buildingField.buildingHeightsM[index] ?? 0);
     }
-    return output;
+    return {
+      obstacleData: output,
+      fetchParseMs: buildingField.fetchParseMs,
+      rasterizeMs: buildingField.rasterizeMs,
+      combineMs: performance.now() - combineStartedAt,
+    };
   }
 
   private uploadHeightTexture(terrainData: Float32Array, obstacleData: Float32Array | null = null): void {

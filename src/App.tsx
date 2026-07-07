@@ -663,6 +663,7 @@ export function App() {
   }
 
   function applyCoverageOverlay(map: mapboxgl.Map, overlay: CoverageOverlay): void {
+    const applyStartedAt = performance.now();
     const displayCanvas = getCoverageDisplayCanvas();
     const displaySize = overlay.gridSizePx * coverageDisplayScale;
     if (displayCanvas.width !== displaySize || displayCanvas.height !== displaySize) {
@@ -670,13 +671,16 @@ export function App() {
       displayCanvas.height = displaySize;
     }
     displayCanvas.style.imageRendering = "pixelated";
+    const displayCopyStartedAt = performance.now();
     const context = displayCanvas.getContext("2d");
     if (context) {
       context.imageSmoothingEnabled = false;
       context.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
       context.drawImage(overlay.canvas, 0, 0, displayCanvas.width, displayCanvas.height);
     }
+    const displayCopyMs = performance.now() - displayCopyStartedAt;
 
+    const mapSourceStartedAt = performance.now();
     ensureCoverageCanvasSource(
       map,
       {
@@ -684,14 +688,32 @@ export function App() {
         canvas: displayCanvas,
       },
     );
+    const mapSourceUpdateMs = performance.now() - mapSourceStartedAt;
+    const fingerprintStartedAt = performance.now();
+    const coverageCanvasFingerprint = canvasFingerprint(displayCanvas);
+    const fingerprintMs = performance.now() - fingerprintStartedAt;
+    const overlayApplyMs = performance.now() - applyStartedAt;
+    const benchmarkStartedAt = import.meta.env.DEV
+      ? (window as Window & { __coverageBenchmarkStartedAt?: number }).__coverageBenchmarkStartedAt
+      : undefined;
+    const timings = overlay.timings
+      ? {
+          ...overlay.timings,
+          actionToOverlayMs: benchmarkStartedAt === undefined ? undefined : performance.now() - benchmarkStartedAt,
+          overlayApplyMs,
+          displayCopyMs,
+          mapSourceUpdateMs,
+          fingerprintMs,
+        }
+      : null;
     updateDebugState({
       coverageCoordinates: overlay.coordinates,
-      coverageCanvasFingerprint: canvasFingerprint(displayCanvas),
+      coverageCanvasFingerprint,
       renderedOperator: overlay.renderedOperator,
       renderSequence: coverageRenderSeqRef.current,
       engine: overlay.engine,
       preferredEngine: preferredCoverageEngine,
-      lastCoverageTimings: overlay.timings ?? null,
+      lastCoverageTimings: timings,
       hasCoverageSource: Boolean(map.getSource("los-coverage")),
       sourceType: getCoverageSourceType(map),
       sourceTypeCounts: getStyleSourceTypeCounts(map),

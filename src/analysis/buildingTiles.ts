@@ -7,6 +7,7 @@ import { coveringDemTiles, type DemTileId, type MercatorBounds } from "./demTile
 type Position = [number, number];
 type PolygonCoordinates = Position[][];
 type MultiPolygonCoordinates = PolygonCoordinates[];
+type XInterval = { start: number; end: number };
 
 export type BuildingHeightField = {
   width: number;
@@ -15,6 +16,8 @@ export type BuildingHeightField = {
   buildingHeightsM: Float32Array;
   zoom: number;
   tileCount: number;
+  fetchParseMs: number;
+  rasterizeMs: number;
 };
 
 export type ParsedBuildingPolygon = {
@@ -45,10 +48,14 @@ export class BuildingHeightTileLoader {
     const zoom = chooseBuildingZoom(bounds);
     const tiles = coveringDemTiles(bounds, zoom);
     const buildingHeightsM = new Float32Array(width * height);
+    const fetchParseStartedAt = performance.now();
     const parsedTiles = await Promise.all(tiles.map((tile) => this.loadParsedTile(tile)));
+    const fetchParseMs = performance.now() - fetchParseStartedAt;
+    const rasterizeStartedAt = performance.now();
     for (const polygons of parsedTiles) {
       rasterizeParsedBuildingPolygons(polygons, bounds, width, height, buildingHeightsM);
     }
+    const rasterizeMs = performance.now() - rasterizeStartedAt;
     return {
       width,
       height,
@@ -56,6 +63,8 @@ export class BuildingHeightTileLoader {
       buildingHeightsM,
       zoom,
       tileCount: tiles.length,
+      fetchParseMs,
+      rasterizeMs,
     };
   }
 
@@ -207,30 +216,29 @@ function rasterizePolygon(
   const y0 = Math.max(0, Math.floor(((minY - bounds.north) / (bounds.south - bounds.north)) * height));
   const y1 = Math.min(height - 1, Math.ceil(((maxY - bounds.north) / (bounds.south - bounds.north)) * height));
 
+  const holes = rings.slice(1);
   for (let y = y0; y <= y1; y++) {
     const mercatorY = bounds.north + ((y + 0.5) / height) * (bounds.south - bounds.north);
-    for (let x = x0; x <= x1; x++) {
-      const mercatorX = bounds.west + ((x + 0.5) / width) * (bounds.east - bounds.west);
-      const point = { x: mercatorX, y: mercatorY };
-      if (!isPointInPolygon(point, rings)) {
-        continue;
+    let intervals = ringIntervalsAtY(outer, mercatorY);
+    for (const hole of holes) {
+      intervals = subtractIntervals(intervals, ringIntervalsAtY(hole, mercatorY));
+      if (intervals.length === 0) {
+        break;
       }
-      const outputIndex = y * width + x;
-      output[outputIndex] = Math.max(output[outputIndex] ?? 0, heightM);
+    }
+    for (const interval of intervals) {
+      const startX = Math.max(x0, Math.ceil(((interval.start - bounds.west) / (bounds.east - bounds.west)) * width - 0.5));
+      const endX = Math.min(x1, Math.floor(((interval.end - bounds.west) / (bounds.east - bounds.west)) * width - 0.5));
+      for (let x = startX; x <= endX; x++) {
+        const outputIndex = y * width + x;
+        output[outputIndex] = Math.max(output[outputIndex] ?? 0, heightM);
+      }
     }
   }
 }
 
-function isPointInPolygon(point: WebMercator, rings: WebMercator[][]): boolean {
-  const [outer, ...holes] = rings;
-  if (!outer || !isPointInRing(point, outer)) {
-    return false;
-  }
-  return !holes.some((hole) => isPointInRing(point, hole));
-}
-
-function isPointInRing(point: WebMercator, ring: WebMercator[]): boolean {
-  let inside = false;
+function ringIntervalsAtY(ring: WebMercator[], y: number): XInterval[] {
+  const intersections: number[] = [];
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const pi = ring[i];
     const pj = ring[j];
@@ -238,11 +246,40 @@ function isPointInRing(point: WebMercator, ring: WebMercator[]): boolean {
       continue;
     }
     const intersects =
-      pi.y > point.y !== pj.y > point.y &&
-      point.x < ((pj.x - pi.x) * (point.y - pi.y)) / (pj.y - pi.y) + pi.x;
+      pi.y > y !== pj.y > y;
     if (intersects) {
-      inside = !inside;
+      intersections.push(((pj.x - pi.x) * (y - pi.y)) / (pj.y - pi.y) + pi.x);
     }
   }
-  return inside;
+  intersections.sort((a, b) => a - b);
+  const intervals: XInterval[] = [];
+  for (let index = 0; index + 1 < intersections.length; index += 2) {
+    const start = intersections[index];
+    const end = intersections[index + 1];
+    if (start !== undefined && end !== undefined && end > start) {
+      intervals.push({ start, end });
+    }
+  }
+  return intervals;
+}
+
+function subtractIntervals(intervals: XInterval[], holes: XInterval[]): XInterval[] {
+  let remaining = intervals;
+  for (const hole of holes) {
+    const next: XInterval[] = [];
+    for (const interval of remaining) {
+      if (hole.end <= interval.start || hole.start >= interval.end) {
+        next.push(interval);
+        continue;
+      }
+      if (hole.start > interval.start) {
+        next.push({ start: interval.start, end: Math.min(hole.start, interval.end) });
+      }
+      if (hole.end < interval.end) {
+        next.push({ start: Math.max(hole.end, interval.start), end: interval.end });
+      }
+    }
+    remaining = next;
+  }
+  return remaining;
 }

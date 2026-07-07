@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BuildingHeightTileLoader } from "./buildingTiles";
+import { BuildingHeightTileLoader, rasterizeParsedBuildingPolygons } from "./buildingTiles";
 import { buildingHeightM } from "./buildings";
 
 describe("building height fallback", () => {
@@ -61,5 +61,41 @@ describe("building tile loader", () => {
     expect(parseCount).toBe(1);
     expect(Math.max(...first.buildingHeightsM)).toBe(12);
     expect(Math.max(...second.buildingHeightsM)).toBe(12);
+  });
+
+  it("rasterizes polygon holes without filling them", () => {
+    const bounds = {
+      west: 0,
+      north: 0,
+      east: 10,
+      south: 10,
+    };
+    const outer = [
+      { x: 1, y: 1 },
+      { x: 9, y: 1 },
+      { x: 9, y: 9 },
+      { x: 1, y: 9 },
+      { x: 1, y: 1 },
+    ];
+    const hole = [
+      { x: 4, y: 4 },
+      { x: 6, y: 4 },
+      { x: 6, y: 6 },
+      { x: 4, y: 6 },
+      { x: 4, y: 4 },
+    ];
+    const output = new Float32Array(100);
+
+    rasterizeParsedBuildingPolygons(
+      [{ rings: [outer, hole], mercatorBounds: { west: 1, north: 1, east: 9, south: 9 }, heightM: 20 }],
+      bounds,
+      10,
+      10,
+      output,
+    );
+
+    expect(output[2 * 10 + 2]).toBe(20);
+    expect(output[5 * 10 + 5]).toBe(0);
+    expect(output[0]).toBe(0);
   });
 });
