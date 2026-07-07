@@ -62,6 +62,6 @@ export const defaultAnalysis: AnalysisRequest = {
   includeBuildings: false,
   includeVegetation: false,
   vegetation: {
-    minCanopyHeightM: 2,
+    minCanopyHeightM: 1.0,
   },
 };
