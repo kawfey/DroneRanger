@@ -66,7 +66,11 @@ import type {
   LinkProfileId,
 } from "./types";
 
-const token = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+const viteMapboxToken = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+const electronBridge = typeof window === "undefined" ? undefined : window.droneRanger;
+const electronMapboxToken = electronBridge?.mapboxToken;
+const token = electronMapboxToken || viteMapboxToken;
+const isPackagedElectron = Boolean(electronBridge && !import.meta.env.DEV);
 
 type MapStyleTemplate = {
   id: string;
@@ -1150,7 +1154,11 @@ export function App() {
         <section className="token-panel">
           <MapPin size={24} />
           <h1>Drone Range Mapper</h1>
-          <p>Add a Mapbox token to <code>.env</code> as <code>VITE_MAPBOX_TOKEN</code>, then start the app.</p>
+          {isPackagedElectron ? (
+            <p>Restart the app and enter a Mapbox API key when prompted.</p>
+          ) : (
+            <p>Add a Mapbox token to <code>.env</code> as <code>VITE_MAPBOX_TOKEN</code>, then start the app.</p>
+          )}
         </section>
       )}
 
