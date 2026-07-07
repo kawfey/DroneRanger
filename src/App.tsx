@@ -103,7 +103,7 @@ const debugModes: Array<{ id: DebugMode; label: string }> = [
   { id: "telemetry", label: "Telemetry" },
   { id: "video", label: "Video" },
   { id: "los", label: "Line of Sight" },
-  { id: "height-map", label: "Occlusion height map" },
+  { id: "height-map", label: "Obstacle height" },
 ];
 
 type InspectorTarget = {
