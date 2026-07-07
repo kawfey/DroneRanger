@@ -28,7 +28,9 @@ pnpm-debug.log*
 .pnpm-store/
 
 dist/
+dist-electron/
 build/
+release/
 .vite/
 .next/
 coverage/

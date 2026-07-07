@@ -1,11 +1,19 @@
 {
   "name": "drone-range-mapper",
+  "productName": "Drone Ranger",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "electron:compile": "tsc -p electron/tsconfig.json",
+    "electron:dev": "concurrently -k \"vite --host 127.0.0.1 --port 5173\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "app:build": "pnpm test && pnpm build && pnpm electron:compile",
+    "dist:win": "pnpm app:build && electron-builder --win portable",
+    "dist:linux": "pnpm app:build && electron-builder --linux AppImage",
+    "dist:mac": "pnpm app:build && electron-builder --mac dmg",
     "preview": "vite preview",
     "test": "vitest run",
     "test:operator-move": "node scripts/operator-move-refresh.mjs",
@@ -25,10 +33,36 @@
   },
   "devDependencies": {
     "@types/mapbox-gl": "^3.4.1",
+    "@types/node": "^26.1.0",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "concurrently": "^10.0.3",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
     "playwright": "^1.61.1",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.drone-ranger.app",
+    "productName": "Drone Ranger",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "mac": {
+      "target": "dmg"
+    }
   }
 }
