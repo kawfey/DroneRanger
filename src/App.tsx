@@ -785,13 +785,17 @@ export function App() {
     request: AnalysisRequest,
     mode: DebugMode,
   ): Promise<TerrainSampler> {
-    if (!request.includeBuildings || !token) {
+    if (!token) {
       buildingFieldRef.current = null;
       return mapTerrainSampler(map);
     }
     const terrainField = await terrainFieldForAnalysis(request, mode);
     if (!terrainField) {
       return mapTerrainSampler(map);
+    }
+    if (!request.includeBuildings) {
+      buildingFieldRef.current = null;
+      return fixedOcclusionSampler(terrainField, null);
     }
     if (!buildingTileLoaderRef.current) {
       buildingTileLoaderRef.current = new BuildingHeightTileLoader(token);
