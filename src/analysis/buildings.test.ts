@@ -38,6 +38,7 @@ describe("building tile loader", () => {
           { x: bounds.west, y: bounds.north },
         ],
       ],
+      mercatorBounds: bounds,
       heightM: 12,
     };
     let fetchCount = 0;

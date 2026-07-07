@@ -19,6 +19,7 @@ export type BuildingHeightField = {
 
 export type ParsedBuildingPolygon = {
   rings: WebMercator[][];
+  mercatorBounds: MercatorBounds;
   heightM: number;
 };
 
@@ -130,18 +131,43 @@ function parseBuildingTile(
     }
     const geometry = feature.toGeoJSON(tileId.x, tileId.y, tileId.z).geometry;
     if (geometry.type === "Polygon") {
-      polygons.push({ rings: mercatorRings(geometry.coordinates as PolygonCoordinates), heightM });
+      polygons.push(parsedBuildingPolygon(geometry.coordinates as PolygonCoordinates, heightM));
     } else if (geometry.type === "MultiPolygon") {
       for (const polygon of geometry.coordinates as MultiPolygonCoordinates) {
-        polygons.push({ rings: mercatorRings(polygon), heightM });
+        polygons.push(parsedBuildingPolygon(polygon, heightM));
       }
     }
   }
   return polygons;
 }
 
+function parsedBuildingPolygon(polygon: PolygonCoordinates, heightM: number): ParsedBuildingPolygon {
+  const rings = mercatorRings(polygon);
+  return {
+    rings,
+    mercatorBounds: boundsForRings(rings),
+    heightM,
+  };
+}
+
 function mercatorRings(polygon: PolygonCoordinates): WebMercator[][] {
   return polygon.map((ring) => ring.map(([lng, lat]) => lngLatToMercator01(lng, lat)));
+}
+
+function boundsForRings(rings: WebMercator[][]): MercatorBounds {
+  let west = Infinity;
+  let north = Infinity;
+  let east = -Infinity;
+  let south = -Infinity;
+  for (const ring of rings) {
+    for (const point of ring) {
+      west = Math.min(west, point.x);
+      north = Math.min(north, point.y);
+      east = Math.max(east, point.x);
+      south = Math.max(south, point.y);
+    }
+  }
+  return { west, north, east, south };
 }
 
 export function rasterizeParsedBuildingPolygons(
@@ -152,12 +178,13 @@ export function rasterizeParsedBuildingPolygons(
   output: Float32Array,
 ): void {
   for (const polygon of polygons) {
-    rasterizePolygon(polygon.rings, polygon.heightM, bounds, width, height, output);
+    rasterizePolygon(polygon.rings, polygon.mercatorBounds, polygon.heightM, bounds, width, height, output);
   }
 }
 
 function rasterizePolygon(
   rings: WebMercator[][],
+  polygonBounds: MercatorBounds,
   heightM: number,
   bounds: MercatorBounds,
   width: number,
@@ -168,11 +195,13 @@ function rasterizePolygon(
   if (!outer || outer.length < 3) {
     return;
   }
-  const flat = rings.flat();
-  const minX = Math.min(...flat.map((point) => point.x));
-  const maxX = Math.max(...flat.map((point) => point.x));
-  const minY = Math.min(...flat.map((point) => point.y));
-  const maxY = Math.max(...flat.map((point) => point.y));
+  const minX = polygonBounds.west;
+  const maxX = polygonBounds.east;
+  const minY = polygonBounds.north;
+  const maxY = polygonBounds.south;
+  if (maxX < bounds.west || minX > bounds.east || maxY < bounds.north || minY > bounds.south) {
+    return;
+  }
   const x0 = Math.max(0, Math.floor(((minX - bounds.west) / (bounds.east - bounds.west)) * width));
   const x1 = Math.min(width - 1, Math.ceil(((maxX - bounds.west) / (bounds.east - bounds.west)) * width));
   const y0 = Math.max(0, Math.floor(((minY - bounds.north) / (bounds.south - bounds.north)) * height));
