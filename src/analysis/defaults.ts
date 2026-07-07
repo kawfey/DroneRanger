@@ -34,8 +34,8 @@ export const defaultProfiles: LinkProfile[] = [
     txLossDb: 0,
     rxGainDbi: 2,
     rxLossDb: 0,
-    rxSensitivityDbm: -98,
-    requiredMarginDb: 8,
+    rxSensitivityDbm: -100,
+    requiredMarginDb: 10,
   },
 ];
 
