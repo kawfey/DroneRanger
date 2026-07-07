@@ -809,17 +809,6 @@ export function App() {
     return fixedOcclusionSampler(terrainField, buildingFieldRef.current.field);
   }
 
-  function currentTerrainSampler(map: mapboxgl.Map, request: AnalysisRequest, mode: DebugMode): TerrainSampler {
-    if (!request.includeBuildings) {
-      return mapTerrainSampler(map);
-    }
-    const signature = buildingFieldSignature(request, mode);
-    const terrainSignature = terrainFieldSignature(request, mode);
-    return buildingFieldRef.current?.signature === signature && terrainFieldRef.current?.signature === terrainSignature
-      ? fixedOcclusionSampler(terrainFieldRef.current.field, buildingFieldRef.current.field)
-      : mapTerrainSampler(map);
-  }
-
   const coverageEngineLabel =
     coverageEngine === "gpu"
       ? analysis.includeBuildings
@@ -1084,11 +1073,22 @@ export function App() {
       setInspector(null);
       return;
     }
-    setInspector(
-      map
-        ? inspectTerrainPixel(currentTerrainSampler(map, analysis, debugMode), analysis, inspectorTarget, debugMode)
-        : inspectFlatEarthPixel(analysis, inspectorTarget, debugMode),
-    );
+    if (!map) {
+      setInspector(inspectFlatEarthPixel(analysis, inspectorTarget, debugMode));
+      return;
+    }
+
+    let cancelled = false;
+    void terrainSamplerForAnalysis(map, analysis, debugMode).then((sampler) => {
+      if (cancelled) {
+        return;
+      }
+      setInspector(inspectTerrainPixel(sampler, analysis, inspectorTarget, debugMode));
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [analysis, debugMode, inspectorTarget, mapDataRevision]);
 
   function setNumber(path: "radiusM" | "gridSizePx", value: number) {

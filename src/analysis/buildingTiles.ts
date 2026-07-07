@@ -20,6 +20,12 @@ export type BuildingHeightField = {
   rasterizeMs: number;
 };
 
+type BuildingTileSet = {
+  bounds: MercatorBounds;
+  zoom: number;
+  tiles: DemTileId[];
+};
+
 export type ParsedBuildingPolygon = {
   rings: WebMercator[][];
   mercatorBounds: MercatorBounds;
@@ -33,7 +39,7 @@ type BuildingTileLoaderOptions = {
 
 const preferredBuildingZoom = 15;
 const minBuildingZoom = 12;
-const maxBuildingTiles = 256;
+const maxBuildingTiles = 96;
 
 export class BuildingHeightTileLoader {
   private readonly tileCache = new Map<string, Promise<ArrayBuffer>>();
@@ -45,15 +51,22 @@ export class BuildingHeightTileLoader {
   ) {}
 
   async buildHeightField(bounds: MercatorBounds, width: number, height: number): Promise<BuildingHeightField> {
-    const zoom = chooseBuildingZoom(bounds);
-    const tiles = coveringDemTiles(bounds, zoom);
+    const tileSets = chooseBuildingTileSets(bounds);
+    const tiles = tileSets.flatMap((tileSet) => tileSet.tiles);
     const buildingHeightsM = new Float32Array(width * height);
     const fetchParseStartedAt = performance.now();
-    const parsedTiles = await Promise.all(tiles.map((tile) => this.loadParsedTile(tile)));
+    const parsedTileSets = await Promise.all(
+      tileSets.map(async (tileSet) => ({
+        ...tileSet,
+        polygons: await Promise.all(tileSet.tiles.map((tile) => this.loadParsedTile(tile))),
+      })),
+    );
     const fetchParseMs = performance.now() - fetchParseStartedAt;
     const rasterizeStartedAt = performance.now();
-    for (const polygons of parsedTiles) {
-      rasterizeParsedBuildingPolygons(polygons, bounds, width, height, buildingHeightsM);
+    for (const tileSet of parsedTileSets) {
+      for (const polygons of tileSet.polygons) {
+        rasterizeParsedBuildingPolygons(polygons, bounds, width, height, buildingHeightsM, tileSet.bounds);
+      }
     }
     const rasterizeMs = performance.now() - rasterizeStartedAt;
     return {
@@ -61,7 +74,7 @@ export class BuildingHeightTileLoader {
       height,
       bounds,
       buildingHeightsM,
-      zoom,
+      zoom: Math.max(...tileSets.map((tileSet) => tileSet.zoom)),
       tileCount: tiles.length,
       fetchParseMs,
       rasterizeMs,
@@ -116,6 +129,60 @@ function chooseBuildingZoom(bounds: MercatorBounds): number {
     }
   }
   return minBuildingZoom;
+}
+
+export function chooseBuildingTileSets(bounds: MercatorBounds): BuildingTileSet[] {
+  const zoom = chooseBuildingZoom(bounds);
+  const fullTiles = coveringDemTiles(bounds, zoom);
+  if (zoom === preferredBuildingZoom) {
+    return [{ bounds, zoom, tiles: fullTiles }];
+  }
+
+  const nearFieldBounds = centeredNearFieldBounds(bounds, preferredBuildingZoom, maxBuildingTiles);
+  if (!nearFieldBounds) {
+    return [{ bounds, zoom, tiles: fullTiles }];
+  }
+
+  return [
+    { bounds, zoom, tiles: fullTiles },
+    {
+      bounds: nearFieldBounds,
+      zoom: preferredBuildingZoom,
+      tiles: coveringDemTiles(nearFieldBounds, preferredBuildingZoom),
+    },
+  ];
+}
+
+function centeredNearFieldBounds(bounds: MercatorBounds, zoom: number, maxTiles: number): MercatorBounds | null {
+  let low = 0;
+  let high = 1;
+  let best: MercatorBounds | null = null;
+
+  for (let iteration = 0; iteration < 24; iteration++) {
+    const scale = (low + high) / 2;
+    const candidate = scaleBoundsFromCenter(bounds, scale);
+    if (coveringDemTiles(candidate, zoom).length <= maxTiles) {
+      best = candidate;
+      low = scale;
+    } else {
+      high = scale;
+    }
+  }
+
+  return best;
+}
+
+function scaleBoundsFromCenter(bounds: MercatorBounds, scale: number): MercatorBounds {
+  const centerX = (bounds.west + bounds.east) / 2;
+  const centerY = (bounds.north + bounds.south) / 2;
+  const halfWidth = ((bounds.east - bounds.west) * scale) / 2;
+  const halfHeight = ((bounds.south - bounds.north) * scale) / 2;
+  return {
+    west: centerX - halfWidth,
+    north: centerY - halfHeight,
+    east: centerX + halfWidth,
+    south: centerY + halfHeight,
+  };
 }
 
 function parseBuildingTile(
@@ -185,9 +252,10 @@ export function rasterizeParsedBuildingPolygons(
   width: number,
   height: number,
   output: Float32Array,
+  clipBounds: MercatorBounds = bounds,
 ): void {
   for (const polygon of polygons) {
-    rasterizePolygon(polygon.rings, polygon.mercatorBounds, polygon.heightM, bounds, width, height, output);
+    rasterizePolygon(polygon.rings, polygon.mercatorBounds, polygon.heightM, bounds, clipBounds, width, height, output);
   }
 }
 
@@ -196,6 +264,7 @@ function rasterizePolygon(
   polygonBounds: MercatorBounds,
   heightM: number,
   bounds: MercatorBounds,
+  clipBounds: MercatorBounds,
   width: number,
   height: number,
   output: Float32Array,
@@ -204,10 +273,10 @@ function rasterizePolygon(
   if (!outer || outer.length < 3) {
     return;
   }
-  const minX = polygonBounds.west;
-  const maxX = polygonBounds.east;
-  const minY = polygonBounds.north;
-  const maxY = polygonBounds.south;
+  const minX = Math.max(polygonBounds.west, clipBounds.west);
+  const maxX = Math.min(polygonBounds.east, clipBounds.east);
+  const minY = Math.max(polygonBounds.north, clipBounds.north);
+  const maxY = Math.min(polygonBounds.south, clipBounds.south);
   if (maxX < bounds.west || minX > bounds.east || maxY < bounds.north || minY > bounds.south) {
     return;
   }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { BuildingHeightTileLoader, rasterizeParsedBuildingPolygons } from "./buildingTiles";
+import { BuildingHeightTileLoader, chooseBuildingTileSets, rasterizeParsedBuildingPolygons } from "./buildingTiles";
 import { buildingHeightM } from "./buildings";
+import { analysisMercatorBounds, coveringDemTiles } from "./demTiles";
+import { defaultAnalysis } from "./defaults";
 
 describe("building height fallback", () => {
   it("prefers explicit height", () => {
@@ -21,6 +23,19 @@ describe("building height fallback", () => {
 });
 
 describe("building tile loader", () => {
+  it("adds a high-zoom near-field layer when the full radius exceeds the z15 budget", () => {
+    const bounds = analysisMercatorBounds(defaultAnalysis, 4250);
+    const tileSets = chooseBuildingTileSets(bounds);
+
+    expect(tileSets).toHaveLength(2);
+    expect(tileSets[0]?.zoom).toBe(14);
+    expect(tileSets[1]?.zoom).toBe(15);
+    expect(coveringDemTiles(bounds, 15).length).toBeGreaterThan(96);
+    expect(tileSets[1]?.tiles.length).toBeLessThanOrEqual(96);
+    expect(tileSets[1]?.bounds.west).toBeGreaterThan(bounds.west);
+    expect(tileSets[1]?.bounds.east).toBeLessThan(bounds.east);
+  });
+
   it("caches parsed tile polygons across height-field builds", async () => {
     const bounds = {
       west: 0.5,
