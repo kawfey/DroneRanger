@@ -1695,9 +1695,9 @@ export function App() {
 
       <div className="hint">
         <Layers size={14} />
-        <span>
-          Drag marker or Shift-click to place operator. Click coverage for inspection. Engine:{" "}
-          {coverageEngineLabel}.
+        <span className="hint-copy">
+          <span>Drag marker or Shift-click to place operator. Click coverage for inspection.</span>
+          <span>Engine: {coverageEngineLabel}.</span>
         </span>
       </div>
     </main>

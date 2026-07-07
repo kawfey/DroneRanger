@@ -459,7 +459,7 @@ output {
 
 .inspector {
   left: 16px;
-  bottom: 92px;
+  bottom: 104px;
   width: min(300px, calc(100vw - 32px));
   padding: 12px;
   border-radius: 8px;
@@ -493,6 +493,11 @@ output {
   border-radius: 8px;
   color: #41505e;
   font-size: 0.82rem;
+}
+
+.hint-copy {
+  display: grid;
+  gap: 2px;
 }
 
 .style-picker {
