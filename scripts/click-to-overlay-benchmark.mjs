@@ -1,6 +1,5 @@
 import { createRequire } from "node:module";
 import { performance } from "node:perf_hooks";
-import { join } from "node:path";
 import { createServer } from "vite";
 
 const require = createRequire(import.meta.url);
@@ -10,15 +9,7 @@ const gridSizes = (process.env.COVERAGE_BENCH_GRIDS ?? "100,192,384").split(",")
 const repetitions = Number(process.env.COVERAGE_BENCH_REPETITIONS ?? 7);
 
 function loadPlaywright() {
-  try {
-    return require("playwright");
-  } catch {
-    const home = process.env.USERPROFILE ?? process.env.HOME;
-    if (!home) {
-      throw new Error("Playwright is not installed and no home directory was found for bundled lookup");
-    }
-    return require(join(home, ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright"));
-  }
+  return require("playwright");
 }
 
 function percentile(values, p) {
@@ -126,8 +117,14 @@ async function setBuildings(page, enabled) {
   const checked = await input.isChecked();
   if (checked !== enabled) {
     await input.click();
+    await details.evaluate((element) => {
+      element.open = false;
+    });
     return true;
   }
+  await details.evaluate((element) => {
+    element.open = false;
+  });
   return false;
 }
 

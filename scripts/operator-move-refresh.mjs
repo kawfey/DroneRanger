@@ -1,5 +1,4 @@
 import { createRequire } from "node:module";
-import { join } from "node:path";
 import { createServer } from "vite";
 
 const require = createRequire(import.meta.url);
@@ -7,15 +6,7 @@ const port = Number(process.env.OPERATOR_MOVE_TEST_PORT ?? 4178);
 const host = "127.0.0.1";
 
 function loadPlaywright() {
-  try {
-    return require("playwright");
-  } catch {
-    const home = process.env.USERPROFILE ?? process.env.HOME;
-    if (!home) {
-      throw new Error("Playwright is not installed and no home directory was found for bundled lookup");
-    }
-    return require(join(home, ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright"));
-  }
+  return require("playwright");
 }
 
 function assert(condition, message) {
