@@ -1273,7 +1273,7 @@ export function App() {
       {!hasToken && (
         <section className="token-panel">
           <MapPin size={24} />
-          <h1>Drone Range Mapper</h1>
+          <h1>Drone Ranger</h1>
           {isPackagedElectron ? (
             <p>Restart the app and enter a Mapbox API key when prompted.</p>
           ) : (
