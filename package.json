@@ -66,6 +66,7 @@
       "target": "AppImage"
     },
     "mac": {
+      "icon": "build/icon.png",
       "target": "dmg"
     }
   }
