@@ -72,11 +72,13 @@ import type {
   LinkProfileId,
 } from "./types";
 
-const viteMapboxToken = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
 const electronBridge = typeof window === "undefined" ? undefined : window.droneRanger;
 const electronMapboxToken = electronBridge?.mapboxToken;
-const token = electronMapboxToken || viteMapboxToken;
 const isPackagedElectron = Boolean(electronBridge && !import.meta.env.DEV);
+const viteMapboxToken = !electronBridge && import.meta.env.DEV
+  ? import.meta.env.VITE_MAPBOX_TOKEN as string | undefined
+  : undefined;
+const token = electronMapboxToken || viteMapboxToken;
 
 type MapStyleTemplate = {
   id: string;
