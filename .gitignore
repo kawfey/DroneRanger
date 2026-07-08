@@ -8,6 +8,8 @@ AGENTS.md
 *.swp
 *.swo
 *~
+start-app.ps1
+stop-app.ps1
 
 # Environment and secrets
 .env
