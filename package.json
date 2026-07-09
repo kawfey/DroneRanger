@@ -63,6 +63,7 @@
       "target": "portable"
     },
     "linux": {
+      "icon": "build/icon.png",
       "target": "AppImage"
     },
     "mac": {
