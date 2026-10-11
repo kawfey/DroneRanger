@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createCoverageGridSpec, evaluateHeightFieldLosRay, flatHeightField } from "./coverageGrid";
+import {
+  coverageRayStepsForRadius,
+  createCoverageGridSpec,
+  evaluateHeightFieldLosRay,
+  flatHeightField,
+  gridRayDistanceM,
+} from "./coverageGrid";
+import { earthRadiusM } from "./coordinates";
 import { defaultAnalysis } from "./defaults";
 
 describe("shader-equivalent LOS mirror", () => {
@@ -71,5 +78,35 @@ describe("shader-equivalent LOS mirror", () => {
     const result = evaluateHeightFieldLosRay(spec, field, targetMercator);
 
     expect(result.requiredAltitudeM).toBeCloseTo(178.5, 6);
+  });
+
+  it("raises required altitude with earth curvature at long range", () => {
+    const request = { ...defaultAnalysis, radiusM: 50000 };
+    const { result, spec, targetMercator } = evaluateEastCell(request);
+    const distanceM = gridRayDistanceM(spec, targetMercator);
+    const twoKR = 2 * (4 / 3) * earthRadiusM;
+    const expectedM = (distanceM - Math.sqrt(twoKR * request.operator.antennaHeightM)) ** 2 / twoKR;
+
+    expect(distanceM).toBeCloseTo(48000, 6);
+    expect(result.minDroneAltitudeAglM).toBeLessThanOrEqual(expectedM + 0.01);
+    expect(result.minDroneAltitudeAglM).toBeGreaterThan(expectedM * 0.98);
+    expect(result.earthBulgeAtLimitM).toBeGreaterThan(0);
+  });
+
+  it("keeps the flat profile at long range when curvature is off", () => {
+    const { result } = evaluateEastCell({
+      ...defaultAnalysis,
+      radiusM: 50000,
+      propagation: { effectiveEarthRadiusK: null },
+    });
+
+    expect(result.requiredAltitudeM).toBe(defaultAnalysis.altitude.minM);
+    expect(result.earthBulgeAtLimitM).toBe(0);
+  });
+
+  it("densifies ray sampling with the analysis radius up to the shader cap", () => {
+    expect(coverageRayStepsForRadius(2500)).toBe(48);
+    expect(coverageRayStepsForRadius(10000)).toBe(100);
+    expect(coverageRayStepsForRadius(100000)).toBe(128);
   });
 });

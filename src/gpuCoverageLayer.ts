@@ -8,8 +8,9 @@ import {
 } from "./analysis/demTiles";
 import {
   clampGridSize,
-  coverageRaySteps,
+  coverageRayStepsForRadius,
   createCoverageGridSpec,
+  maxCoverageRaySteps,
   gridCellMercator,
   maxGpuCoverageGridPx,
   sampleObstacleHeightField,
@@ -22,6 +23,7 @@ import { VegetationHeightTileLoader, type VegetationHeightField } from "./analys
 import { plotCoverageGridData } from "./analysis/coveragePlot";
 import { analysisRadiusM } from "./analysis/singleRay";
 import { combinedMaxFreeSpaceRangeM, maxFreeSpaceRangeM } from "./analysis/rf";
+import { curvatureInvM } from "./analysis/propagation";
 import type {
   AnalysisRequest,
   CoverageCoordinates,
@@ -54,9 +56,9 @@ void main() {
   gl_Position = vec4(a_position, 0.0, 1.0);
 }`;
 
-const numericFragmentShaderSource = `#version 300 es
-precision highp float;
-
+// LOS solver shared by the numeric and colour programs. Mirrored on the CPU by
+// evaluateHeightFieldLosRay (coverageGrid.ts); keep the two in step.
+const coverageSolverShaderSource = `
 uniform sampler2D u_height;
 uniform float u_heightTexturePx;
 uniform vec2 u_operatorUv;
@@ -67,9 +69,7 @@ uniform int u_altitudeCriterion;
 uniform float u_radiusM;
 uniform float u_maxReachM;
 uniform int u_raySteps;
-
-in vec2 v_uv;
-out vec4 outData;
+uniform float u_curvatureInvM;
 
 vec2 heightPairAt(vec2 uv) {
   vec2 clampedUv = clamp(uv, vec2(0.0), vec2(1.0));
@@ -117,13 +117,14 @@ vec4 solveCoverage(vec2 terrainUv) {
     ? targetTerrainM + minAltitudeM
     : max(operatorAbsM + minAltitudeM, targetTerrainM + minAltitudeM);
 
-  for (int step = 1; step < 128; step++) {
+  for (int step = 1; step < ${maxCoverageRaySteps}; step++) {
     if (step >= u_raySteps) {
       break;
     }
     float t = float(step) / float(u_raySteps);
     vec2 sampleUv = mix(u_operatorUv, terrainUv, t);
-    float obstacleM = obstacleAt(sampleUv);
+    float bulgeM = t * (1.0 - t) * distanceM * distanceM * u_curvatureInvM;
+    float obstacleM = obstacleAt(sampleUv) + bulgeM;
     requiredTargetAbsM = max(requiredTargetAbsM, operatorAbsM + (obstacleM - operatorAbsM) / max(t, 0.001));
   }
 
@@ -133,6 +134,13 @@ vec4 solveCoverage(vec2 terrainUv) {
   float reachable = criterionAltitudeM <= u_maxAltitudeM ? 1.0 : 0.0;
   return vec4(requiredAltitudeM, requiredAltitudeAglM, reachable * rangePass, distanceM);
 }
+`;
+
+const numericFragmentShaderSource = `#version 300 es
+precision highp float;
+${coverageSolverShaderSource}
+in vec2 v_uv;
+out vec4 outData;
 
 void main() {
   vec2 terrainUv = vec2(v_uv.x, 1.0 - v_uv.y);
@@ -141,85 +149,12 @@ void main() {
 
 const colorFragmentShaderSource = `#version 300 es
 precision highp float;
-
-uniform sampler2D u_height;
-uniform float u_heightTexturePx;
-uniform vec2 u_operatorUv;
-uniform float u_antennaHeightM;
-uniform float u_minAltitudeM;
-uniform float u_maxAltitudeM;
+${coverageSolverShaderSource}
 uniform float u_colorSteps;
-uniform int u_altitudeCriterion;
-uniform float u_radiusM;
-uniform float u_maxReachM;
-uniform int u_raySteps;
 uniform int u_debugMode;
 
 in vec2 v_uv;
 out vec4 outColor;
-
-vec2 heightPairAt(vec2 uv) {
-  vec2 clampedUv = clamp(uv, vec2(0.0), vec2(1.0));
-  vec2 pixel = clampedUv * u_heightTexturePx - 0.5;
-  vec2 base = floor(pixel);
-  vec2 fracPart = pixel - base;
-  vec2 maxPixel = vec2(u_heightTexturePx - 1.0);
-  vec2 p00 = clamp(base, vec2(0.0), maxPixel);
-  vec2 p11 = clamp(base + vec2(1.0), vec2(0.0), maxPixel);
-  vec2 uv00 = (p00 + 0.5) / u_heightTexturePx;
-  vec2 uv10 = (vec2(p11.x, p00.y) + 0.5) / u_heightTexturePx;
-  vec2 uv01 = (vec2(p00.x, p11.y) + 0.5) / u_heightTexturePx;
-  vec2 uv11 = (p11 + 0.5) / u_heightTexturePx;
-  vec2 h00 = texture(u_height, uv00).rg;
-  vec2 h10 = texture(u_height, uv10).rg;
-  vec2 h01 = texture(u_height, uv01).rg;
-  vec2 h11 = texture(u_height, uv11).rg;
-  return mix(mix(h00, h10, fracPart.x), mix(h01, h11, fracPart.x), fracPart.y);
-}
-
-float terrainAt(vec2 uv) {
-  return heightPairAt(uv).r;
-}
-
-float obstacleAt(vec2 uv) {
-  return heightPairAt(uv).g;
-}
-
-vec4 solveCoverage(vec2 terrainUv) {
-  vec2 circle = terrainUv * 2.0 - 1.0;
-  if (dot(circle, circle) > 1.0) {
-    return vec4(0.0, 0.0, 0.0, 0.0);
-  }
-
-  float distanceM = length(circle) * u_radiusM;
-  float rangePass = distanceM <= u_maxReachM ? 1.0 : 0.0;
-  if (distanceM > u_maxReachM) {
-    return vec4(u_maxAltitudeM + 1.0, 0.0, rangePass, distanceM);
-  }
-
-  float operatorAbsM = terrainAt(u_operatorUv) + u_antennaHeightM;
-  float targetTerrainM = terrainAt(terrainUv);
-  float minAltitudeM = u_altitudeCriterion == 1 ? max(0.0, u_minAltitudeM) : u_minAltitudeM;
-  float requiredTargetAbsM = u_altitudeCriterion == 1
-    ? targetTerrainM + minAltitudeM
-    : max(operatorAbsM + minAltitudeM, targetTerrainM + minAltitudeM);
-
-  for (int step = 1; step < 128; step++) {
-    if (step >= u_raySteps) {
-      break;
-    }
-    float t = float(step) / float(u_raySteps);
-    vec2 sampleUv = mix(u_operatorUv, terrainUv, t);
-    float obstacleM = obstacleAt(sampleUv);
-    requiredTargetAbsM = max(requiredTargetAbsM, operatorAbsM + (obstacleM - operatorAbsM) / max(t, 0.001));
-  }
-
-  float requiredAltitudeM = requiredTargetAbsM - operatorAbsM;
-  float requiredAltitudeAglM = max(0.0, requiredTargetAbsM - targetTerrainM);
-  float criterionAltitudeM = u_altitudeCriterion == 1 ? requiredAltitudeAglM : requiredAltitudeM;
-  float reachable = criterionAltitudeM <= u_maxAltitudeM ? 1.0 : 0.0;
-  return vec4(requiredAltitudeM, requiredAltitudeAglM, reachable * rangePass, distanceM);
-}
 
 vec3 altitudeColor(float requiredAltitudeM) {
   float minAltitudeM = u_altitudeCriterion == 1 ? max(0.0, u_minAltitudeM) : u_minAltitudeM;
@@ -798,7 +733,8 @@ export class GpuCoverageLayer {
     setUniform1i(gl, program, "u_altitudeCriterion", altitudeCriterionIndex(this.analysis.altitudeCriterion));
     setUniform1f(gl, program, "u_radiusM", radiusM);
     setUniform1f(gl, program, "u_maxReachM", maxReachM(this.analysis, this.debugMode, radiusM));
-    setUniform1i(gl, program, "u_raySteps", coverageRaySteps);
+    setUniform1i(gl, program, "u_raySteps", coverageRayStepsForRadius(radiusM));
+    setUniform1f(gl, program, "u_curvatureInvM", curvatureInvM(this.analysis.propagation.effectiveEarthRadiusK));
   }
 
   private initGeometry(program: WebGLProgram): void {

@@ -45,6 +45,9 @@ export const defaultAnalysis: AnalysisRequest = {
     lat: 40.4168,
     antennaHeightM: 1.5,
   },
+  propagation: {
+    effectiveEarthRadiusK: 4 / 3,
+  },
   radiusM: 2500,
   gridSizePx: 320,
   calculationRange: {

@@ -108,6 +108,21 @@ const debugModes: Array<{ id: DebugMode; label: string }> = [
   { id: "height-map", label: "Obstacle height" },
 ];
 
+const earthCurvatureOptions: Array<{ value: string; k: number | null; label: string }> = [
+  { value: "off", k: null, label: "Off (flat profile)" },
+  { value: "1", k: 1, label: "k = 1 (no refraction)" },
+  { value: "4/3", k: 4 / 3, label: "k = 4/3 (standard)" },
+  { value: "1.5", k: 1.5, label: "k = 1.5" },
+  { value: "2", k: 2, label: "k = 2 (super-refractive)" },
+];
+
+function earthCurvatureOptionValue(k: number | null): string {
+  const match = earthCurvatureOptions.find((option) =>
+    option.k === null ? k === null : k !== null && Math.abs(option.k - k) < 1e-6,
+  );
+  return match?.value ?? "4/3";
+}
+
 type InspectorTarget = {
   lng: number;
   lat: number;
@@ -1342,6 +1357,32 @@ export function App() {
           </span>
         </label>
 
+        <label>
+          <span className="inline-control compact-inline">
+            <span>Earth curvature</span>
+            <select
+              className="compact-select"
+              value={earthCurvatureOptionValue(analysis.propagation.effectiveEarthRadiusK)}
+              onChange={(event) => {
+                const option = earthCurvatureOptions.find((candidate) => candidate.value === event.target.value);
+                if (!option) {
+                  return;
+                }
+                setAnalysis((current) => ({
+                  ...current,
+                  propagation: { ...current.propagation, effectiveEarthRadiusK: option.k },
+                }));
+              }}
+            >
+              {earthCurvatureOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </span>
+        </label>
+
         <div className="altitude-range-row">
           <label className="range-pair-label">
             Altitude range
@@ -1774,6 +1815,22 @@ export function App() {
             <dd>{inspector.minDroneAltitudeAglM.toFixed(1)} m</dd>
             <dt>Operator altitude (ASL)</dt>
             <dd>{inspector.operatorAltitudeAslM.toFixed(1)} m</dd>
+            <dt>Earth bulge at limit</dt>
+            <dd>{inspector.earthBulgeAtLimitM.toFixed(1)} m</dd>
+            {inspector.fresnelRadiusAtLimitM !== null && (
+              <>
+                <dt>Fresnel F1 at limit</dt>
+                <dd>{inspector.fresnelRadiusAtLimitM.toFixed(1)} m</dd>
+              </>
+            )}
+            {inspector.fresnelClearElevationChangeM !== null && inspector.fresnelClearAglM !== null && (
+              <>
+                <dt>Elev. change for 0.6·F1</dt>
+                <dd>{inspector.fresnelClearElevationChangeM.toFixed(1)} m</dd>
+                <dt>Drone AGL for 0.6·F1</dt>
+                <dd>{inspector.fresnelClearAglM.toFixed(1)} m</dd>
+              </>
+            )}
             {debugMode !== "combined" && debugMode !== "los" && inspector.modeMarginDb !== null && (
               <>
                 <dt>{modeMarginLabel(debugMode)}</dt>

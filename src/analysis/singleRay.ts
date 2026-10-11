@@ -5,10 +5,29 @@ import {
 } from "./coordinates";
 import { buildingHeightM } from "./buildings";
 import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "./rf";
+import {
+  curvatureInvM,
+  earthBulgeAlongPathM,
+  fresnelClearanceFraction,
+  fresnelRadiusM,
+  lowestFrequencyMHz,
+  requiredTargetAbsForSample,
+} from "./propagation";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile } from "../types";
 
-export const coverageRaySteps = 48;
+export const minCoverageRaySteps = 48;
+/** Hard cap shared with the shader loop bound. */
+export const maxCoverageRaySteps = 128;
+const coverageRaySpacingM = 100;
 const maxRfAnalysisRadiusM = 100000;
+
+/**
+ * Samples per ray. Curvature moves the limiting sample towards the operator at long range
+ * (t* ≈ √(2kR·h_op)/D), so wider analyses need denser sampling; the default 2.5 km radius keeps 48.
+ */
+export function coverageRayStepsForRadius(radiusM: number): number {
+  return Math.max(minCoverageRaySteps, Math.min(maxCoverageRaySteps, Math.ceil(radiusM / coverageRaySpacingM)));
+}
 
 function altitudeAglM(requiredTargetAbsM: number, targetTerrainM: number): number {
   return Math.max(0, requiredTargetAbsM - targetTerrainM);
@@ -41,6 +60,18 @@ export type LosRayResult = {
   operatorAltitudeAslM: number;
   limitingObstacle: ObstacleSample["source"] | null;
   targetTerrainM: number;
+  /** Path fraction of the limiting sample; null when the minimum altitude governs. */
+  limitingSampleT: number | null;
+  earthBulgeAtLimitM: number;
+  fresnelRadiusAtLimitM: number | null;
+  /** Diagnostic only: target altitude that keeps `fresnelClearanceFraction`·F1 clear of every sample. */
+  fresnelClearTargetAbsM: number | null;
+};
+
+export type LosRayOptions = {
+  raySteps?: number;
+  /** Frequency used for the Fresnel diagnostics; null skips them (pure geometric modes). */
+  fresnelFrequencyMHz?: number | null;
 };
 
 export function occlusionHeightM(
@@ -95,7 +126,21 @@ export function analysisRadiusM(request: AnalysisRequest, debugMode: DebugMode):
   return Math.max(250, Math.min(maxRfAnalysisRadiusM, rfRange || request.radiusM));
 }
 
+const flatTerrainSampler: TerrainSampler = {
+  queryTerrainElevation: () => 0,
+};
+
+/** Inspection without terrain data: sea-level ground everywhere, but earth curvature still applies. */
 export function inspectFlatEarthPixel(
+  request: AnalysisRequest,
+  target: { lng: number; lat: number },
+  debugMode: DebugMode,
+): CoveragePixel {
+  return inspectTerrainPixel(flatTerrainSampler, request, target, debugMode);
+}
+
+/** Range and link-margin criteria only; the LOS fields are placeholders until a ray is evaluated. */
+function inspectRfPixel(
   request: AnalysisRequest,
   target: { lng: number; lat: number },
   debugMode: DebugMode,
@@ -129,23 +174,10 @@ export function inspectFlatEarthPixel(
       return mask | bit;
     }, 0),
     debugValue: distanceM,
-  };
-}
-
-export function evaluateFlatEarthLosRay(
-  request: AnalysisRequest,
-  target: { lng: number; lat: number },
-): LosRayResult {
-  const operatorAbsM = request.operator.antennaHeightM;
-  const targetTerrainM = 0;
-  const requiredTargetAbsM = minimumTargetAltitudeM(request, operatorAbsM, targetTerrainM);
-  return {
-    requiredAltitudeM: requiredTargetAbsM - operatorAbsM,
-    requiredTargetAbsM,
-    requiredElevationChangeM: requiredTargetAbsM - operatorAbsM,
-    operatorAltitudeAslM: operatorAbsM,
-    limitingObstacle: null,
-    targetTerrainM,
+    earthBulgeAtLimitM: 0,
+    fresnelRadiusAtLimitM: null,
+    fresnelClearElevationChangeM: null,
+    fresnelClearAglM: null,
   };
 }
 
@@ -153,29 +185,55 @@ export function evaluateTerrainLosRay(
   map: TerrainSampler,
   request: AnalysisRequest,
   target: { lng: number; lat: number },
+  options: LosRayOptions = {},
 ): LosRayResult {
+  const raySteps = options.raySteps ?? minCoverageRaySteps;
+  const fresnelFrequencyMHz = options.fresnelFrequencyMHz ?? null;
   const operatorTerrain = terrainElevation(map, request.operator);
   const targetTerrain = terrainElevation(map, target);
   const operatorAbsM = operatorTerrain + request.operator.antennaHeightM;
   const operatorMercator = lngLatToMercator01(request.operator.lng, request.operator.lat);
   const targetMercator = lngLatToMercator01(target.lng, target.lat);
-  let requiredTargetAbsM = minimumTargetAltitudeM(request, operatorAbsM, targetTerrain);
+  const distanceM = haversineDistanceM(request.operator, target);
+  const curvatureInv = curvatureInvM(request.propagation.effectiveEarthRadiusK);
+  const minimumTargetAbsM = minimumTargetAltitudeM(request, operatorAbsM, targetTerrain);
+  let requiredTargetAbsM = minimumTargetAbsM;
   let limitingObstacle: ObstacleSample["source"] | null = null;
+  let limitingSampleT: number | null = null;
+  let earthBulgeAtLimitM = 0;
+  let fresnelClearTargetAbsM = fresnelFrequencyMHz === null ? null : minimumTargetAbsM;
 
-  for (let step = 1; step < coverageRaySteps; step++) {
-    const t = step / coverageRaySteps;
+  for (let step = 1; step < raySteps; step++) {
+    const t = step / raySteps;
     const sampleLngLat = mercator01ToLngLat({
       x: operatorMercator.x + (targetMercator.x - operatorMercator.x) * t,
       y: operatorMercator.y + (targetMercator.y - operatorMercator.y) * t,
     });
     const sampleTerrain = terrainElevation(map, sampleLngLat);
     const sampleObstacle = obstacleElevation(map, request, sampleLngLat, sampleTerrain);
-    const sampleRequiredTargetAbsM = operatorAbsM + (sampleObstacle.elevationM - operatorAbsM) / t;
+    const bulgeM = earthBulgeAlongPathM(t, distanceM, curvatureInv);
+    const obstacleM = sampleObstacle.elevationM + bulgeM;
+    const sampleRequiredTargetAbsM = requiredTargetAbsForSample(operatorAbsM, obstacleM, t);
     if (sampleRequiredTargetAbsM > requiredTargetAbsM) {
       requiredTargetAbsM = sampleRequiredTargetAbsM;
       limitingObstacle = sampleObstacle.source;
+      limitingSampleT = t;
+      earthBulgeAtLimitM = bulgeM;
+    }
+    if (fresnelFrequencyMHz !== null && fresnelClearTargetAbsM !== null) {
+      const clearanceM =
+        fresnelClearanceFraction * fresnelRadiusM(fresnelFrequencyMHz, t * distanceM, (1 - t) * distanceM);
+      fresnelClearTargetAbsM = Math.max(
+        fresnelClearTargetAbsM,
+        requiredTargetAbsForSample(operatorAbsM, obstacleM + clearanceM, t),
+      );
     }
   }
+
+  const fresnelRadiusAtLimitM =
+    fresnelFrequencyMHz !== null && limitingSampleT !== null
+      ? fresnelRadiusM(fresnelFrequencyMHz, limitingSampleT * distanceM, (1 - limitingSampleT) * distanceM)
+      : null;
 
   return {
     requiredAltitudeM: requiredTargetAbsM - operatorAbsM,
@@ -184,6 +242,10 @@ export function evaluateTerrainLosRay(
     operatorAltitudeAslM: operatorAbsM,
     limitingObstacle,
     targetTerrainM: targetTerrain,
+    limitingSampleT,
+    earthBulgeAtLimitM,
+    fresnelRadiusAtLimitM,
+    fresnelClearTargetAbsM,
   };
 }
 
@@ -193,8 +255,11 @@ export function inspectTerrainPixel(
   target: { lng: number; lat: number },
   debugMode: DebugMode,
 ): CoveragePixel {
-  const pixel = inspectFlatEarthPixel(request, target, debugMode);
-  const los = evaluateTerrainLosRay(map, request, target);
+  const pixel = inspectRfPixel(request, target, debugMode);
+  const los = evaluateTerrainLosRay(map, request, target, {
+    raySteps: coverageRayStepsForRadius(analysisRadiusM(request, debugMode)),
+    fresnelFrequencyMHz: lowestFrequencyMHz(selectedProfilesForMode(request, debugMode)),
+  });
   const criteria = criteriaFromLabel(pixel.violationCriteria);
   if (altitudeCriterionValue(request, los) > request.altitude.maxM) {
     criteria.add(obstacleCriteriaLabel(los.limitingObstacle));
@@ -209,6 +274,12 @@ export function inspectTerrainPixel(
     operatorAltitudeAslM: los.operatorAltitudeAslM,
     violationCriteria: criteriaLabel(criteria),
     reachable,
+    earthBulgeAtLimitM: los.earthBulgeAtLimitM,
+    fresnelRadiusAtLimitM: los.fresnelRadiusAtLimitM,
+    fresnelClearElevationChangeM:
+      los.fresnelClearTargetAbsM === null ? null : los.fresnelClearTargetAbsM - los.operatorAltitudeAslM,
+    fresnelClearAglM:
+      los.fresnelClearTargetAbsM === null ? null : altitudeAglM(los.fresnelClearTargetAbsM, los.targetTerrainM),
   };
 }
 

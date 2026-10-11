@@ -1,10 +1,11 @@
 import { analysisMercatorBounds, mercatorToTextureUv, type MercatorBounds } from "./demTiles";
 import { haversineDistanceM, mercator01ToLngLat, type WebMercator } from "./coordinates";
-import { analysisRadiusM, coverageRaySteps } from "./singleRay";
+import { analysisRadiusM, coverageRayStepsForRadius, maxCoverageRaySteps } from "./singleRay";
 import { combinedMaxFreeSpaceRangeM, linkMarginDb, maxFreeSpaceRangeM } from "./rf";
+import { curvatureInvM, earthBulgeAlongPathM, requiredTargetAbsForSample } from "./propagation";
 import type { AnalysisRequest, CoveragePixel, DebugMode, LinkProfile } from "../types";
 
-export { coverageRaySteps };
+export { coverageRayStepsForRadius, maxCoverageRaySteps };
 export const minCoverageGridPx = 25;
 export const maxCpuCoverageGridPx = 384;
 export const maxGpuCoverageGridPx = 1024;
@@ -144,7 +145,19 @@ export function solveHeightFieldPixel(
       return mask | bit;
     }, 0),
     debugValue: distanceM,
+    earthBulgeAtLimitM: los.earthBulgeAtLimitM,
+    fresnelRadiusAtLimitM: null,
+    fresnelClearElevationChangeM: null,
+    fresnelClearAglM: null,
   };
+}
+
+/** Ground distance the way the shader measures it: planar in the analysis square, scaled by the radius. */
+export function gridRayDistanceM(spec: CoverageGridSpec, targetMercator: WebMercator): number {
+  const uv = mercatorToTextureUv(targetMercator, spec.bounds);
+  const dx = uv.u * 2 - 1;
+  const dy = uv.v * 2 - 1;
+  return Math.sqrt(dx * dx + dy * dy) * spec.radiusM;
 }
 
 export function evaluateHeightFieldLosRay(
@@ -156,21 +169,31 @@ export function evaluateHeightFieldLosRay(
   requiredElevationChangeM: number;
   minDroneAltitudeAglM: number;
   operatorAltitudeAslM: number;
+  earthBulgeAtLimitM: number;
 } {
   const request = spec.request;
+  const raySteps = coverageRayStepsForRadius(spec.radiusM);
   const operatorTerrain = sampleHeightField(field, spec.operatorMercator);
   const targetTerrain = sampleHeightField(field, targetMercator);
   const operatorAbsM = operatorTerrain + request.operator.antennaHeightM;
+  const distanceM = gridRayDistanceM(spec, targetMercator);
+  const curvatureInv = curvatureInvM(request.propagation.effectiveEarthRadiusK);
   let requiredTargetAbsM = minimumTargetAltitudeM(request, operatorAbsM, targetTerrain);
+  let earthBulgeAtLimitM = 0;
 
-  for (let step = 1; step < coverageRaySteps; step++) {
-    const t = step / coverageRaySteps;
+  for (let step = 1; step < raySteps; step++) {
+    const t = step / raySteps;
     const sample = {
       x: spec.operatorMercator.x + (targetMercator.x - spec.operatorMercator.x) * t,
       y: spec.operatorMercator.y + (targetMercator.y - spec.operatorMercator.y) * t,
     };
-    const obstacleM = sampleObstacleHeightField(field, sample);
-    requiredTargetAbsM = Math.max(requiredTargetAbsM, operatorAbsM + (obstacleM - operatorAbsM) / t);
+    const bulgeM = earthBulgeAlongPathM(t, distanceM, curvatureInv);
+    const obstacleM = sampleObstacleHeightField(field, sample) + bulgeM;
+    const sampleRequiredTargetAbsM = requiredTargetAbsForSample(operatorAbsM, obstacleM, t);
+    if (sampleRequiredTargetAbsM > requiredTargetAbsM) {
+      requiredTargetAbsM = sampleRequiredTargetAbsM;
+      earthBulgeAtLimitM = bulgeM;
+    }
   }
 
   return {
@@ -178,6 +201,7 @@ export function evaluateHeightFieldLosRay(
     requiredElevationChangeM: requiredTargetAbsM - operatorAbsM,
     minDroneAltitudeAglM: altitudeAglM(requiredTargetAbsM, targetTerrain),
     operatorAltitudeAslM: operatorAbsM,
+    earthBulgeAtLimitM,
   };
 }
 

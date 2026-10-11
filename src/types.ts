@@ -25,12 +25,18 @@ export type CalculationRange =
       manualM: number;
     };
 
+export type PropagationSettings = {
+  /** Effective earth radius factor k (4/3 = standard atmosphere). null disables curvature (flat vertical profile). */
+  effectiveEarthRadiusK: number | null;
+};
+
 export type AnalysisRequest = {
   operator: {
     lng: number;
     lat: number;
     antennaHeightM: number;
   };
+  propagation: PropagationSettings;
   radiusM: number;
   gridSizePx: number;
   calculationRange: CalculationRange;
@@ -113,4 +119,11 @@ export type CoveragePixel = {
   modeMarginDb: number | null;
   profileMask: number;
   debugValue: number;
+  /** Earth-curvature bulge at the sample that limits the required altitude; 0 when no sample limits. */
+  earthBulgeAtLimitM: number;
+  /** First Fresnel zone radius at the limiting sample for the lowest active frequency; null outside RF modes. */
+  fresnelRadiusAtLimitM: number | null;
+  /** Diagnostic only: altitude that would keep 0.6·F1 clearance along the whole path. */
+  fresnelClearElevationChangeM: number | null;
+  fresnelClearAglM: number | null;
 };

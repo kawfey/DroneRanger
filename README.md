@@ -25,6 +25,22 @@ On first launch, Drone Ranger asks for a Mapbox access token and stores it local
 
 This project is pre-release software. Treat coverage output as a planning aid, not as an aviation, legal, or safety guarantee. Real-world link quality depends on hardware, antennas, interference, weather, Fresnel clearance, local rules, and site conditions.
 
+## Propagation Model
+
+The coverage map shows the minimum drone altitude at which a straight operator-to-drone ray clears every terrain, building, and canopy sample along the path, combined with a free-space link budget.
+
+Modelled:
+
+- Free-space path loss with per-link gains, losses, receiver sensitivity, and a fixed required margin.
+- Earth curvature with an effective earth radius factor (k). The default k = 4/3 represents standard atmospheric refraction; k = 1 is the geometric earth, and "Off" gives a flat vertical profile.
+- Terrain, building, and vegetation obstruction as hard blockers.
+
+Reported in the inspector but not enforced:
+
+- First Fresnel zone radius at the limiting obstacle and the altitude that would keep 0.6·F1 clearance along the whole path, using the lowest active link frequency.
+
+Not modelled yet: diffraction loss over obstacles, atmospheric gas and rain attenuation, foliage loss in dB, ground reflection and multipath, antenna patterns, and interference.
+
 ## Requirements
 
 - A portable desktop build.

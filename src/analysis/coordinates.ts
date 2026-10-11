@@ -4,6 +4,7 @@ export type WebMercator = {
 };
 
 const earthCircumferenceM = 40075016.68557849;
+export const earthRadiusM = 6371008.8;
 
 export function lngLatToMercator01(lng: number, lat: number): WebMercator {
   const x = (lng + 180) / 360;
@@ -25,7 +26,7 @@ export function metersToMercatorUnits(meters: number, lat: number): number {
 }
 
 export function haversineDistanceM(a: { lng: number; lat: number }, b: { lng: number; lat: number }): number {
-  const r = 6371008.8;
+  const r = earthRadiusM;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;
   const dLng = ((b.lng - a.lng) * Math.PI) / 180;
   const lat1 = (a.lat * Math.PI) / 180;

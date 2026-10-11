@@ -89,6 +89,9 @@ async function validateScenario(
   request: AnalysisRequest,
   debugMode: DebugMode,
   field: HeightField,
+  // The CPU reports haversine distance while the GPU reports planar Mercator distance; the gap
+  // grows with radius. The LOS solver itself uses the planar distance on both sides.
+  maxDistanceToleranceM = 4,
 ): Promise<ValidationResult> {
   const spec = createCoverageGridSpec(request, debugMode);
   const cpu = solveHeightFieldGrid(spec, field);
@@ -141,7 +144,7 @@ async function validateScenario(
     name,
     passed:
       maxAltitudeErrorM <= 0.01 &&
-      maxDistanceErrorM <= 4 &&
+      maxDistanceErrorM <= maxDistanceToleranceM &&
       classificationMismatches === 0 &&
       renderedAlphaMismatches === 0,
     maxAltitudeErrorM,
@@ -251,6 +254,11 @@ window.runGpuCoverageValidation = async () => {
     calculationRange: { mode: "manual", manualM: 4000 },
     altitude: { minM: 0, maxM: 120 },
   });
+  const curvatureRequest = makeRequest({
+    radiusM: 20000,
+    propagation: { effectiveEarthRadiusK: 4 / 3 },
+  });
+  const curvatureSpec = createCoverageGridSpec(curvatureRequest, "los");
 
   try {
     return [
@@ -265,6 +273,7 @@ window.runGpuCoverageValidation = async () => {
         buildingBlockerField(buildingBlockerSpec),
       ),
       await validateScenario(layer, "manual range cutoff", cutoffRequest, "combined", flatHeightField(cutoffSpec, 0)),
+      await validateScenario(layer, "earth curvature", curvatureRequest, "los", flatHeightField(curvatureSpec, 0), 100),
       await validateLosFootprintDiameter(layer, losFootprintRequest),
     ];
   } finally {

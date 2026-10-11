@@ -1,10 +1,116 @@
 import { describe, expect, it, vi } from "vitest";
 import { defaultAnalysis } from "./defaults";
+import { earthRadiusM, haversineDistanceM } from "./coordinates";
 import { inspectFlatEarthPixel, inspectTerrainPixel } from "./singleRay";
 
 const flatMap = {
   queryTerrainElevation: () => 0,
 };
+
+/** Drone height needed at ground distance D over a smooth earth: D = √(2kR·h₁) + √(2kR·h₂). */
+function radioHorizonDroneHeightM(distanceM: number, antennaHeightM: number, k: number): number {
+  const twoKR = 2 * k * earthRadiusM;
+  const antennaHorizonM = Math.sqrt(twoKR * antennaHeightM);
+  return Math.max(0, distanceM - antennaHorizonM) ** 2 / twoKR;
+}
+
+describe("earth curvature", () => {
+  const longRange = {
+    ...defaultAnalysis,
+    radiusM: 60000,
+    calculationRange: { mode: "manual" as const, manualM: 60000 },
+    altitude: { minM: 0, maxM: 500 },
+  };
+  const targetAtKm = (km: number) => ({
+    lng: longRange.operator.lng + km / 84.76,
+    lat: longRange.operator.lat,
+  });
+
+  it.each([20, 50])("reproduces the radio horizon over flat ground at %i km", (km) => {
+    const target = targetAtKm(km);
+    const distanceM = haversineDistanceM(longRange.operator, target);
+    const expectedM = radioHorizonDroneHeightM(distanceM, longRange.operator.antennaHeightM, 4 / 3);
+
+    const inspected = inspectTerrainPixel(flatMap, longRange, target, "los");
+
+    // The oracle is height above ground; discrete sampling can only miss the true limiting point, never exceed it.
+    expect(inspected.minDroneAltitudeAglM).toBeLessThanOrEqual(expectedM + 0.01);
+    expect(inspected.minDroneAltitudeAglM).toBeGreaterThan(expectedM * 0.98);
+    expect(inspected.earthBulgeAtLimitM).toBeGreaterThan(0);
+  });
+
+  it("needs more altitude without refraction than with the standard atmosphere", () => {
+    const target = targetAtKm(30);
+    const geometric = inspectTerrainPixel(
+      flatMap,
+      { ...longRange, propagation: { effectiveEarthRadiusK: 1 } },
+      target,
+      "los",
+    );
+    const standard = inspectTerrainPixel(flatMap, longRange, target, "los");
+
+    expect(geometric.requiredElevationChangeM).toBeGreaterThan(standard.requiredElevationChangeM);
+  });
+
+  it("keeps the flat vertical profile when curvature is off", () => {
+    const inspected = inspectTerrainPixel(
+      flatMap,
+      { ...longRange, propagation: { effectiveEarthRadiusK: null } },
+      targetAtKm(50),
+      "los",
+    );
+
+    expect(inspected.requiredElevationChangeM).toBe(0);
+    expect(inspected.earthBulgeAtLimitM).toBe(0);
+  });
+
+  it("applies curvature to the no-terrain inspection too", () => {
+    const target = targetAtKm(50);
+
+    expect(inspectFlatEarthPixel(longRange, target, "los")).toEqual(
+      inspectTerrainPixel(flatMap, longRange, target, "los"),
+    );
+    expect(inspectFlatEarthPixel(longRange, target, "los").requiredElevationChangeM).toBeGreaterThan(100);
+  });
+});
+
+describe("fresnel diagnostics", () => {
+  const target = {
+    lng: defaultAnalysis.operator.lng + 0.01,
+    lat: defaultAnalysis.operator.lat,
+  };
+  const ridgeMap = {
+    queryTerrainElevation: (lngLat: { lng: number }) =>
+      lngLat.lng > defaultAnalysis.operator.lng + 0.004 && lngLat.lng < defaultAnalysis.operator.lng + 0.006
+        ? 20
+        : 0,
+  };
+
+  it("reports the clearance altitude without enforcing it", () => {
+    const inspected = inspectTerrainPixel(flatMap, defaultAnalysis, target, "combined");
+
+    expect(inspected.requiredElevationChangeM).toBe(0);
+    expect(inspected.fresnelRadiusAtLimitM).toBeNull();
+    expect(inspected.fresnelClearElevationChangeM).toBeGreaterThan(0);
+    expect(inspected.fresnelClearAglM).toBeGreaterThan(inspected.fresnelClearElevationChangeM ?? 0);
+  });
+
+  it("reports the zone radius at the obstacle that limits the ray", () => {
+    const inspected = inspectTerrainPixel(ridgeMap, defaultAnalysis, target, "combined");
+
+    expect(inspected.requiredElevationChangeM).toBeGreaterThan(0);
+    expect(inspected.fresnelRadiusAtLimitM).toBeGreaterThan(0);
+    expect(inspected.fresnelClearElevationChangeM).toBeGreaterThan(inspected.requiredElevationChangeM);
+  });
+
+  it("skips Fresnel diagnostics in geometric modes", () => {
+    const inspected = inspectTerrainPixel(ridgeMap, defaultAnalysis, target, "los");
+
+    expect(inspected.fresnelRadiusAtLimitM).toBeNull();
+    expect(inspected.fresnelClearElevationChangeM).toBeNull();
+    expect(inspected.fresnelClearAglM).toBeNull();
+  });
+});
 
 describe("single ray inspector", () => {
   it("matches flat-earth inspection when terrain is flat", () => {
