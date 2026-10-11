@@ -39,7 +39,7 @@ Reported in the inspector but not enforced:
 
 - First Fresnel zone radius at the limiting obstacle and the altitude that would keep 0.6·F1 clearance along the whole path, using the lowest active link frequency.
 
-Not modelled yet: diffraction loss over obstacles, atmospheric gas and rain attenuation, foliage loss in dB, ground reflection and multipath, antenna patterns, and interference.
+planned/todo: diffraction loss over obstacles, atmospheric gas and rain attenuation, foliage loss in dB, ground reflection and multipath, antenna patterns, interference, ieee & ITU models 
 
 ## Requirements
 
